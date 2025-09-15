@@ -1,0 +1,325 @@
+Ты хочешь встроить C-библиотеку moonlight-common-c (которая реализует стриминговый протокол GameStream) и получать сырые кадры для вывода через SwiftUI. Это возможно с помощью bridging-header и простых C-обёрток. Вот общий план и примеры нужных файлов.
+
+⸻
+
+1. Подключение moonlight-common-c к проекту
+
+• Собери или добавь исходники moonlight-common-c как часть Xcode-проекта (обычно через добавление .c/.h файлов или подключение собранной .dylib/.a).
+• Убедись, что функции экспонируются для C (extern "C").
+
+⸻
+
+2. Bridging Header
+
+Создай файл, например, MoonlightBridge.h:
+
+
+/
+//  ContentView.swift
+//  New Test App
+//
+//  Created by Rodney Mackey on 09.08.2025.
+//
+
+import SwiftUI
+import AppKit
+import ScreenCaptureKit
+import AVFoundation
+import Combine
+import Foundation
+
+// Вспомогательный класс для запуска внешнего приложения
+final class AppLauncher {
+    static func launchMoonlight() {
+        let task = Process()
+        // Укажите корректный путь к исполняемому файлу moonlight-qt
+        task.launchPath = "~/moonlight-qt-master/build/moonlight-qt.app/Contents/MacOS/moonlight-qt"
+        task.arguments = []
+        task.standardOutput = nil
+        task.standardError = nil
+        do {
+            try task.run()
+        } catch {
+            print("Failed to launch moonlight-qt: \(error)")
+        }
+    }
+}
+
+final class ScreenCaptureManager: NSObject, ObservableObject {
+    @Published var image: CIImage?
+    @Published var availableWindows: [SCWindow] = []
+    @Published var selectedWindow: SCWindow?
+    @Published var captureSize: CGSize = .zero
+    private var stream: SCStream?
+    private var filter: SCContentFilter?
+    
+    func loadAvailableWindows() async {
+        do {
+            let shareable = try await SCShareableContent.current
+            await MainActor.run {
+                self.availableWindows = shareable.windows.filter { window in
+                    // Имя приложения не должно быть пустым
+                    guard let appName = window.owningApplication?.applicationName, !appName.isEmpty else { return false }
+                    // Исключаем окна системных приложений (например, по bundleID)
+                    if let bundleID = window.owningApplication?.bundleIdentifier, bundleID.hasPrefix("com.apple.") {
+                        return false
+                    }
+                    // Всё остальное показываем, даже если isOnScreen == false (для поддержки полноэкранных приложений)
+                    return true
+                }
+            }
+        } catch {
+            print("Ошибка загрузки окон: \(error)")
+        }
+    }
+    
+    func startCapture() async {
+        guard let window = selectedWindow else { return }
+        do {
+            filter = SCContentFilter(desktopIndependentWindow: window)
+            let config = SCStreamConfiguration()
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 30) // ~30 fps
+            // Получаем размер окна трансляции
+            let width = Int(window.frame.width)
+            let height = Int(window.frame.height)
+            config.width = width
+            config.height = height
+            await MainActor.run { self.captureSize = CGSize(width: width, height: height) }
+            stream = SCStream(filter: filter!, configuration: config, delegate: self)
+            try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .main)
+            try await stream?.startCapture()
+        } catch {
+            print("Screen capture error: \(error)")
+        }
+    }
+}
+
+extension ScreenCaptureManager: SCStreamOutput {
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+        guard outputType == .screen, let imgBuffer = sampleBuffer.imageBuffer else { return }
+        let ciImage = CIImage(cvPixelBuffer: imgBuffer)
+        self.image = ciImage
+    }
+}
+
+extension ScreenCaptureManager: SCStreamDelegate {}
+
+final class OverlayWindowController: NSWindowController {
+    convenience init(content: NSView) {
+        let rect = NSScreen.main?.frame ?? .zero
+        let window = NSWindow(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.level = .screenSaver
+        window.ignoresMouseEvents = true
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = false
+        window.toolbar = nil
+        window.contentView = content
+        self.init(window: window)
+    }
+}
+
+struct ContentView: View {
+    @StateObject private var capture = ScreenCaptureManager()
+    @State private var overlay: OverlayWindowController?
+    
+    var body: some View {
+        VStack {
+//            ScrollView(.vertical) {
+                ZStack {
+                    if let ciImage = capture.image,
+                       let cgImage = CIContext().createCGImage(ciImage, from: ciImage.extent) {
+                        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: ciImage.extent.width, height: ciImage.extent.height))
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: capture.captureSize.width == 0 ? 640 : capture.captureSize.width,
+                                   height: capture.captureSize.height == 0 ? 360 : capture.captureSize.height)
+                            .clipped()
+                            .ignoresSafeArea()
+                    }
+                    
+                    VStack {
+                        (
+                            Text("DrMackey:").foregroundColor(.purple) +
+                            Text(" Добро пожаловать на стрим!").foregroundColor(.white)
+                        )
+                        .bold()
+                        .opacity(0.9)
+                        .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 0)
+                        .padding()
+                        .font(.title)
+                        .glassEffect(.clear)
+                        .padding(.top, 12)
+			.id(message.text + (message.sender))
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: message.text + (message.sender))
+                        .padding(.top, 12)
+                        Spacer()
+                    }
+//                    .frame(maxWidth: .infinity, alignment: .top)
+                }
+//            }
+            .frame(width: capture.captureSize.width == 0 ? 640 : capture.captureSize.width,
+                   height: capture.captureSize.height == 0 ? 360 : capture.captureSize.height)
+        }
+        .toolbar {
+            ToolbarSpacer(.flexible)
+            ToolbarSpacer(.flexible)
+            ToolbarItem {
+                VStack {
+                    (
+                        Text("DrMackey:").foregroundColor(.purple) +
+                        Text(" Добро пожаловать на стрим!").foregroundColor(.white)
+                    )
+                    .padding()
+//                    .font(.title)
+//                    .glassEffect()
+//                    .padding(.top, 12)
+//                    Spacer()
+                }
+            }
+            
+            ToolbarSpacer(.flexible)
+            ToolbarItemGroup {
+                Button("Запустить Moonlight") {
+                    AppLauncher.launchMoonlight()
+                }
+                Button("Start Capture") {
+                    Task { await capture.startCapture() }
+                }
+
+                Picker(selection: $capture.selectedWindow, label: Text(capture.selectedWindow?.title ?? "Выбрать окно (можно выбрать окно moonlight-qt, если оно запущено)")) {
+                    ForEach(capture.availableWindows, id: \.self) { window in
+                        Text(window.owningApplication?.applicationName ?? "Без названия")
+                            .tag(Optional(window))
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+        }
+        .toolbar(removing: .title)
+//        .toolbarBackground(.hidden, for: .automatic)
+//        .ignoresSafeArea(edges: .top)
+        .onChange(of: capture.captureSize) { newSize in
+            guard newSize != .zero else { return }
+            if let window = NSApp.mainWindow {
+                window.setContentSize(newSize)
+                window.center()
+            }
+        }
+        .task {
+            await capture.loadAvailableWindows()
+        }
+    }
+}
+
+// Комментарий для пользователя: теперь можно запускать moonlight-qt из интерфейса, а затем выбрать его окно для захвата и отображения в ContentView.
+
+#Preview {
+    ContentView()
+}
+
+проанализируй https://github.com/moonlight-stream/moonlight-qt/tree/master/app и скажи, какой используется заголовок главного окна в приложении?
+
+Автоматически созданы все необходимые файлы для интеграции Qt/SwiftUI с реальным окном Moonlight:
+
+1. Bridging Header:
+   • New_Test_App-Bridging-Header.h (содержит #import "[MoonlightQtBridge.h􀰓](file:///Users/DrMackey/dev/New%20Test%20App/New%20Test%20App/MoonlightQtBridge.h)")
+   • Убедитесь, что путь к этому файлу указан в настройках таргета Xcode:
+ *Build Settings → Swift Compiler - General → Objective-C Bridging Header*  
+
+ Пример: `$(PROJECT_DIR)/New Test App/New_Test_App-Bridging-Header.h`
+
+
+2. Bridge для Qt-контролла:
+   • MoonlightQtBridge.h􀰓 (интерфейс)
+   • MoonlightQtBridge.mm (реализация, использует Qt-класс MainWindow)
+   • В реализации создаётся и возвращается реальное главное окно Moonlight (MainWindow).
+
+3. ContentView.swift􀰓:
+   • Теперь содержит только интеграцию через MoonlightQtView и overlay-приветствие.
+   • Вся логика старого захвата/процессов удалена.
+
+Дальнейшие шаги:
+• Убедитесь, что файлы Qt и заголовки доступны проекту.
+• Убедитесь, что Qt и moonlight-qt библиотеки корректно добавлены в link phase вашего Xcode проекта.
+• Всё готово для запуска Moonlight UI прямо внутри SwiftUI-окна.
+
+Если нужна поддержка по настройке линковки Qt или сборке .mm файлов — напишите!
+
+
+Проверь реализацию задержки вывода сообщений на корректность и найди логические ошибки, почему все равно выводится каждое сообщение, даже при реализации буфера
+
+-------------
+
+if let showMsg = activeMessage?.processed ?? processedMessage {
+            GlassEffectContainer(spacing: 10.0) {
+                HStack(spacing: 8) {
+                    
+                    BadgeAndNickView(
+                        badgeViewsArray: showMsg.badges,
+                        senderText: Text(showMsg.sender).foregroundColor(showMsg.senderColor)
+                    )
+                    // Отслеживаем ширину badgeView, чтобы использовать её для выравнивания
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { badgeWidth = geo.size.width }
+                                .onChange(of: geo.size.width) { newValue in badgeWidth = newValue }
+                        }
+                    )
+                    MessagePartsRowView(visiblePartsArray: showMsg.visibleParts, isTruncated: showMsg.isTruncated)
+                        .id(animationKey)
+//                        .transition(.move(edge: .top))
+                    // Прозрачный прямоугольник для выравнивания, ширина совпадает с badgeWidth
+                    Color.clear.frame(width: badgeWidth, height: 1) // Для выравнивания MessagePartsRowView с BadgeAndNickView
+                }
+                .animation(.spring(response: 0.5, dampingFraction: 0.7), value: animationKey)
+            }
+            .onChange(of: processedMessage?.sender) { newSender in
+                guard let processed = processedMessage else { return }
+                
+                // Если сейчас анимация, буферим
+                if isAnimating {
+                    messageBuffer.append((sender: processed.sender, processed: processed))
+                    return
+                }
+                
+                // Если lastSender ещё nil, показываем сразу через processNextMessageFromBuffer
+                if lastSender == nil {
+                    messageBuffer.append((sender: processed.sender, processed: processed))
+                    isAnimating = true
+                    processNextMessageFromBuffer()
+                    return
+                }
+                
+                if lastSender != processed.sender {
+                    // Добавляем в буфер и запускаем процесс, если он не идёт
+                    messageBuffer.append((sender: processed.sender, processed: processed))
+                    if !isAnimating {
+                        isAnimating = true
+                        processNextMessageFromBuffer()
+                    }
+                } else {
+                    // Тот же ник — просто обновить activeMessage без анимации
+                    activeMessage = (sender: processed.sender, processed: processed)
+                }
+            }
+            .onAppear {
+                isExpanded = true
+                lastSender = processedMessage?.sender
+                messageBuffer = []
+                activeMessage = nil
+                isAnimating = false
+            }
+        } else {
+            ProgressView()
+                .frame(maxWidth: maxWidth, maxHeight: 44)
+                .padding()
+        }
+        
+    }
+}
