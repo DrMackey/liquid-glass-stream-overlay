@@ -10,7 +10,7 @@ import AppKit
 import UIKit
 #endif
 
-let TWITCH_CHANNEL = "melharucos"
+let TWITCH_CHANNEL = "marts_comm"
 
 /// Представляет часть сообщения: текст или эмот.
 enum MessagePart: Hashable {
