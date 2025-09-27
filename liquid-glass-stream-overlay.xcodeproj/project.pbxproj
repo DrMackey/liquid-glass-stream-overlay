@@ -91,7 +91,7 @@
 					};
 				};
 			};
-			buildConfigurationList = E4B1AD1B2E479A31006EBE1F /* Build configuration list for PBXProject "dgsg" */;
+			buildConfigurationList = E4B1AD1B2E479A31006EBE1F /* Build configuration list for PBXProject "liquid-glass-stream-overlay" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -339,7 +339,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		E4B1AD1B2E479A31006EBE1F /* Build configuration list for PBXProject "dgsg" */ = {
+		E4B1AD1B2E479A31006EBE1F /* Build configuration list for PBXProject "liquid-glass-stream-overlay" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E4B1AD292E479A33006EBE1F /* Debug */,

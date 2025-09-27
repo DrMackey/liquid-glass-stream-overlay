@@ -88,7 +88,7 @@ final class CameraCaptureManager: NSObject, ObservableObject, AVCaptureVideoData
         } else {
             let msg = "No suitable 1920x1080@60fps camera format found!"
             errorMessage = msg
-            print(msg)
+//            print(msg)
             return false
         }
         guard

@@ -10,7 +10,12 @@ import AppKit
 import UIKit
 #endif
 
-let TWITCH_CHANNEL = "marts_comm"
+let TWITCH_CHANNEL = "ZakvielChannel"
+
+// Константы Helix API (по примеру curl: Client-Id + Bearer)
+// При необходимости подставьте свои значения.
+let TWITCH_HELIX_CLIENT_ID = "gp762nuuoqcoxypju8c569th9wz7q5"
+let TWITCH_HELIX_BEARER_TOKEN = "2s4x0c089w8u5ouwdoi5veduxk9sbr"
 
 /// Представляет часть сообщения: текст или эмот.
 enum MessagePart: Hashable {
@@ -161,6 +166,12 @@ final class TwitchChatManager: ObservableObject {
     @Published var stvChannelEmoteMap: [String: (url: String, animated: Bool)] = [:]
     @Published var bttvGlobalMap: [String: String] = [:]
     @Published var bttvChannelMap: [String: String] = [:]
+    
+    // Новые опубликованные значения для GlassBarContainer
+    @Published var streamTitle: String = ""
+    @Published var categoryName: String = ""
+    @Published var categoryImageURL: URL? = nil
+
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "TwitchChatQueue")
     private let oauthToken = "oauth:2s4x0c089w8u5ouwdoi5veduxk9sbr"
@@ -169,6 +180,29 @@ final class TwitchChatManager: ObservableObject {
     private var lastDisplayTime: Date = .distantPast
     private var pendingMessage: Message? = nil
     private var displayTimer: Timer?
+    
+    // Task для обновления информации о стриме
+    private var streamInfoTask: Task<Void, Never>?
+
+    init() {
+        print("[TwitchChat] init()")
+        // Стартуем фоновое обновление информации о стриме/категории
+        streamInfoTask = Task { [weak self] in
+            await self?.runStreamInfoLoop()
+        }
+    }
+
+    deinit {
+        print("[TwitchChat] deinit()")
+        streamInfoTask?.cancel()
+    }
+    
+    // Единое добавление Helix-заголовков (по примеру curl)
+    private func addHelixHeaders(_ request: inout URLRequest) {
+        // Здесь подставляется Client-Id из TWITCH_HELIX_CLIENT_ID и Bearer-токен
+        request.addValue("Bearer \(TWITCH_HELIX_BEARER_TOKEN)", forHTTPHeaderField: "Authorization")
+        request.addValue(TWITCH_HELIX_CLIENT_ID, forHTTPHeaderField: "Client-Id")
+    }
 
     func badgeViews(from badges: [(String, String)], badgeUrlMap: [String: [String: String]]) -> [BadgeViewData] {
         badges.map { (set, version) -> BadgeViewData in
@@ -178,6 +212,8 @@ final class TwitchChatManager: ObservableObject {
     }
 
     func start() {
+        print("[TwitchChat] start() called — запускаем IRC соединение")
+        // ВАЖНО: stop() отменяет streamInfoTask. Мы сразу после stop() перезапустим её ниже.
         stop()
         let host = NWEndpoint.Host("irc.chat.twitch.tv")
         let port = NWEndpoint.Port(rawValue: 6697)!
@@ -185,19 +221,22 @@ final class TwitchChatManager: ObservableObject {
         connection?.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
+                print("[TwitchChat] IRC connection ready")
                 self?.sendCredentials()
                 self?.receiveMessages()
             case .failed(let error):
-                // Use badgeViewData from allBadgeImages for system message too
+                print("[TwitchChat] IRC connection failed: \(error)")
                 let badgeViewData = self?.badgeViews(from: [], badgeUrlMap: self?.allBadgeImages ?? [:]) ?? []
                 self?.setLastMessageThrottled(Message(sender: "system", text: "Connection failed: \(error.localizedDescription)", badges: [], senderColor: Color.gray, badgeViewData: badgeViewData))
                 DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
                     self?.start()
                 }
             case .waiting(let error):
+                print("[TwitchChat] IRC connection waiting: \(error)")
                 let badgeViewData = self?.badgeViews(from: [], badgeUrlMap: self?.allBadgeImages ?? [:]) ?? []
                 self?.setLastMessageThrottled(Message(sender: "system", text: "Connection waiting: \(error.localizedDescription)", badges: [], senderColor: Color.gray, badgeViewData: badgeViewData))
             case .cancelled:
+                print("[TwitchChat] IRC connection cancelled")
                 let badgeViewData = self?.badgeViews(from: [], badgeUrlMap: self?.allBadgeImages ?? [:]) ?? []
                 self?.setLastMessageThrottled(Message(sender: "system", text: "Connection cancelled", badges: [], senderColor: Color.gray, badgeViewData: badgeViewData))
             default:
@@ -205,9 +244,16 @@ final class TwitchChatManager: ObservableObject {
             }
         }
         connection?.start(queue: queue)
+        // Перезапускаем фоновую задачу получения информации о стриме, если она была отменена stop()
+        if streamInfoTask == nil {
+            streamInfoTask = Task { [weak self] in
+                await self?.runStreamInfoLoop()
+            }
+        }
     }
 
     private func sendCredentials() {
+        print("[TwitchChat] sendCredentials()")
         guard let connection = connection else { return }
         send("CAP REQ :twitch.tv/tags\r\n")
         let commands = [
@@ -291,7 +337,6 @@ final class TwitchChatManager: ObservableObject {
                     if let messageRange = restOfLine.range(of: " :") {
                         let msgText = String(restOfLine[messageRange.upperBound...])
                         let senderShown = display_name ?? sender
-                        // Compute badgeViewData here using allBadgeImages
                         let badgeViewData = badgeViews(from: badges, badgeUrlMap: allBadgeImages)
                         setLastMessageThrottled(Message(sender: senderShown, text: msgText, badges: badges, senderColor: senderColor, badgeViewData: badgeViewData))
                     }
@@ -331,11 +376,15 @@ final class TwitchChatManager: ObservableObject {
     }
 
     func stop() {
+        print("[TwitchChat] stop() — останавливаем IRC и фоновые задачи")
         connection?.cancel()
         connection = nil
         displayTimer?.invalidate()
         displayTimer = nil
         pendingMessage = nil
+        // Останавливаем фоновые обновления информации о стриме
+        streamInfoTask?.cancel()
+        streamInfoTask = nil // чтобы в start() можно было создать новую задачу
     }
 
     func loadAllBadges(channelLogin: String) async {
@@ -343,9 +392,11 @@ final class TwitchChatManager: ObservableObject {
         do {
             let urlGlobal = URL(string: "https://api.twitch.tv/helix/chat/badges/global")!
             var reqGlobal = URLRequest(url: urlGlobal)
-            reqGlobal.addValue("Bearer 2s4x0c089w8u5ouwdoi5veduxk9sbr", forHTTPHeaderField: "Authorization")
-            reqGlobal.addValue("gp762nuuoqcoxypju8c569th9wz7q5", forHTTPHeaderField: "Client-Id")
-            let (dataGlobal, _) = try await URLSession.shared.data(for: reqGlobal)
+            addHelixHeaders(&reqGlobal)
+            let (dataGlobal, resp) = try await URLSession.shared.data(for: reqGlobal)
+            if let http = resp as? HTTPURLResponse {
+                print("[TwitchChat] badges/global status: \(http.statusCode)")
+            }
             struct BadgeVersion: Decodable { let id: String; let image_url_1x: String? }
             struct BadgeSet: Decodable { let set_id: String; let versions: [BadgeVersion] }
             struct HelixResponse: Decodable { let data: [BadgeSet] }
@@ -359,17 +410,21 @@ final class TwitchChatManager: ObservableObject {
         do {
             let userURL = URL(string: "https://api.twitch.tv/helix/users?login=\(channelLogin)")!
             var userRequest = URLRequest(url: userURL)
-            userRequest.addValue("Bearer 2s4x0c089w8u5ouwdoi5veduxk9sbr", forHTTPHeaderField: "Authorization")
-            userRequest.addValue("gp762nuuoqcoxypju8c569th9wz7q5", forHTTPHeaderField: "Client-Id")
-            let (userData, _) = try await URLSession.shared.data(for: userRequest)
+            addHelixHeaders(&userRequest)
+            let (userData, resp) = try await URLSession.shared.data(for: userRequest)
+            if let http = resp as? HTTPURLResponse {
+                print("[TwitchChat] users?login= status: \(http.statusCode)")
+            }
             struct UserResponse: Decodable { struct User: Decodable { let id: String }; let data: [User] }
             let decodedUser = try JSONDecoder().decode(UserResponse.self, from: userData)
             guard let userId = decodedUser.data.first?.id else { return }
             let badgeURL = URL(string: "https://api.twitch.tv/helix/chat/badges?broadcaster_id=\(userId)")!
             var badgeRequest = URLRequest(url: badgeURL)
-            badgeRequest.addValue("Bearer 2s4x0c089w8u5ouwdoi5veduxk9sbr", forHTTPHeaderField: "Authorization")
-            badgeRequest.addValue("gp762nuuoqcoxypju8c569th9wz7q5", forHTTPHeaderField: "Client-Id")
-            let (badgeData, _) = try await URLSession.shared.data(for: badgeRequest)
+            addHelixHeaders(&badgeRequest)
+            let (badgeData, resp2) = try await URLSession.shared.data(for: badgeRequest)
+            if let http = resp2 as? HTTPURLResponse {
+                print("[TwitchChat] chat/badges?broadcaster_id= status: \(http.statusCode)")
+            }
             struct BadgeVersion: Decodable { let id: String; let image_url_1x: String? }
             struct BadgeSet: Decodable { let set_id: String; let versions: [BadgeVersion] }
             struct HelixResponse: Decodable { let data: [BadgeSet] }
@@ -386,8 +441,10 @@ final class TwitchChatManager: ObservableObject {
     func load7TVEmotes() async {
         let url = URL(string: "https://7tv.io/v3/emote-sets/global")!
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            // Парсер для глобальных 7TV эмоут
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            if let http = resp as? HTTPURLResponse {
+                print("[TwitchChat] 7TV global status: \(http.statusCode)")
+            }
             struct GlobalEmoteResponse: Decodable { let emotes: [STVEmote] }
             let decoded = try JSONDecoder().decode(GlobalEmoteResponse.self, from: data)
             var map: [String: String] = [:]
@@ -407,12 +464,18 @@ final class TwitchChatManager: ObservableObject {
     func load7TVChannelEmotes(channelLogin: String) async {
         let userUrl = URL(string: "https://api.ivr.fi/v2/twitch/user?login=\(channelLogin)")!
         do {
-            let (userData, _) = try await URLSession.shared.data(from: userUrl)
+            let (userData, userHTTPResp) = try await URLSession.shared.data(from: userUrl)
+            if let http = userHTTPResp as? HTTPURLResponse {
+                print("[TwitchChat] IVR user status: \(http.statusCode)")
+            }
             struct User: Decodable { let id: String }
             let userObj = try JSONDecoder().decode([User].self, from: userData)
             guard let userId = userObj.first?.id else { return }
             let setUrl = URL(string: "https://7tv.io/v3/users/twitch/\(userId)")!
-            let (data, _) = try await URLSession.shared.data(from: setUrl)
+            let (data, resp2) = try await URLSession.shared.data(from: setUrl)
+            if let http = resp2 as? HTTPURLResponse {
+                print("[TwitchChat] 7TV user set status: \(http.statusCode)")
+            }
             struct UserSet: Decodable {
                 struct EmoteSet: Decodable {
                     struct Emote: Decodable {
@@ -459,7 +522,10 @@ final class TwitchChatManager: ObservableObject {
     func loadBTTVGlobalEmotes() async {
         let url = URL(string: "https://api.betterttv.net/3/cached/emotes/global")!
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            if let http = resp as? HTTPURLResponse {
+                print("[TwitchChat] BTTV global status: \(http.statusCode)")
+            }
             struct Emote: Decodable { let code: String; let id: String }
             let emotes = try JSONDecoder().decode([Emote].self, from: data)
             var map: [String: String] = [:]
@@ -471,16 +537,28 @@ final class TwitchChatManager: ObservableObject {
     func loadBTTVChannelEmotes(channelLogin: String) async {
         let userUrl = URL(string: "https://api.ivr.fi/v2/twitch/user?login=\(channelLogin)")!
         do {
-            let (userData, _) = try await URLSession.shared.data(from: userUrl)
+            let (userData, userHTTPResp) = try await URLSession.shared.data(from: userUrl)
+            if let http = userHTTPResp as? HTTPURLResponse {
+                print("[TwitchChat] IVR user (BTTV) status: \(http.statusCode)")
+            }
             struct User: Decodable { let id: String }
             let userObj = try JSONDecoder().decode([User].self, from: userData)
             guard let userId = userObj.first?.id else { return }
             let url = URL(string: "https://api.betterttv.net/3/cached/users/twitch/\(userId)")!
-            let (data, _) = try await URLSession.shared.data(from: url)
-            struct Resp: Decodable { let channelEmotes: [Emote]; let sharedEmotes: [Emote]; struct Emote: Decodable { let code: String; let id: String } }
-            let resp = try JSONDecoder().decode(Resp.self, from: data)
+            let (data, bttvHTTPResp) = try await URLSession.shared.data(from: url)
+            if let http = bttvHTTPResp as? HTTPURLResponse {
+                print("[TwitchChat] BTTV user status: \(http.statusCode)")
+            }
+            struct BTTVUserEmotesResponse: Decodable {
+                let channelEmotes: [Emote]
+                let sharedEmotes: [Emote]
+                struct Emote: Decodable { let code: String; let id: String }
+            }
+            let decodedBTTV = try JSONDecoder().decode(BTTVUserEmotesResponse.self, from: data)
             var map: [String: String] = [:]
-            for emote in resp.channelEmotes + resp.sharedEmotes { map[emote.code] = "https://cdn.betterttv.net/emote/\(emote.id)/1x" }
+            for emote in decodedBTTV.channelEmotes + decodedBTTV.sharedEmotes {
+                map[emote.code] = "https://cdn.betterttv.net/emote/\(emote.id)/1x"
+            }
             DispatchQueue.main.async { self.bttvChannelMap = map }
         } catch { print("BTTV channel load error: \(error)") }
     }
@@ -492,12 +570,13 @@ final class TwitchChatManager: ObservableObject {
         await loadBTTVChannelEmotes(channelLogin: TWITCH_CHANNEL)
         let url = URL(string: "https://api.twitch.tv/helix/chat/emotes/global")!
         var req = URLRequest(url: url)
-        req.addValue("Bearer 2s4x0c089w8u5ouwdoi5veduxk9sbr", forHTTPHeaderField: "Authorization")
-        req.addValue("gp762nuuoqcoxypju8c569th9wz7q5", forHTTPHeaderField: "Client-Id")
-        // Парсер для глобальных твитч смайлов (official)
+        addHelixHeaders(&req)
         struct Response: Decodable { let data: [Emote] }
         do {
-            let (data, _) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            if let http = resp as? HTTPURLResponse {
+                print("[TwitchChat] helix chat/emotes/global status: \(http.statusCode)")
+            }
             let result = try JSONDecoder().decode(Response.self, from: data)
             var map: [String: String] = [:]
             for emote in result.data {
@@ -559,6 +638,136 @@ final class TwitchChatManager: ObservableObject {
     }
 }
 
+// MARK: - Stream Info (название стрима, категория, постер категории)
+extension TwitchChatManager {
+    private struct UsersResponse: Decodable {
+        struct User: Decodable { let id: String }
+        let data: [User]
+    }
+    private struct ChannelsResponse: Decodable {
+        struct Channel: Decodable {
+            let broadcaster_id: String
+            let title: String
+            let game_id: String
+            let game_name: String
+        }
+        let data: [Channel]
+    }
+    private struct GamesResponse: Decodable {
+        struct Game: Decodable {
+            let id: String
+            let name: String
+            let box_art_url: String
+        }
+        let data: [Game]
+    }
+    
+    // Фоновый цикл: первично получает channelId, затем опрашивает Helix каждые 30 сек
+    fileprivate func runStreamInfoLoop() async {
+        print("[TwitchChat] runStreamInfoLoop() start. channelId=\(channelId ?? "nil")")
+        if channelId == nil {
+            if let id = try? await fetchChannelId(login: TWITCH_CHANNEL) {
+                print("[TwitchChat] fetched channelId=\(id)")
+                self.channelId = id
+            } else {
+                print("[TwitchChat] fetchChannelId failed")
+            }
+        }
+        while !Task.isCancelled {
+            print("[TwitchChat] refreshStreamInfo() tick")
+            await refreshStreamInfo()
+            try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
+        }
+        print("[TwitchChat] runStreamInfoLoop() cancelled")
+    }
+    
+    private func fetchChannelId(login: String) async throws -> String {
+        // ВАЖНО: Twitch логины — в нижнем регистре
+        let url = URL(string: "https://api.twitch.tv/helix/users?login=\(login.lowercased())")!
+        var req = URLRequest(url: url)
+        addHelixHeaders(&req)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        if let http = resp as? HTTPURLResponse {
+            print("[TwitchChat] helix/users status: \(http.statusCode)")
+        }
+        let decoded = try JSONDecoder().decode(UsersResponse.self, from: data)
+        guard let id = decoded.data.first?.id else {
+            throw URLError(.badServerResponse)
+        }
+        return id
+    }
+    
+    @MainActor
+    private func applyChannel(title: String, gameName: String) {
+        if self.streamTitle != title {
+            self.streamTitle = title
+            print("Название трансляции: \(title)")
+        }
+        if self.categoryName != gameName {
+            self.categoryName = gameName
+            print("Категория: \(gameName)")
+        }
+    }
+    
+    @MainActor
+    private func applyGameImage(url: URL?) {
+        if self.categoryImageURL != url {
+            self.categoryImageURL = url
+            if let url { print("[TwitchChat] Обновлён постер категории: \(url.absoluteString)") }
+            else { print("[TwitchChat] Постер категории сброшен (пустая категория)") }
+        }
+    }
+    
+    private func refreshStreamInfo() async {
+        do {
+            if channelId == nil {
+                print("[TwitchChat] channelId отсутствует — пробуем получить")
+                channelId = try await fetchChannelId(login: TWITCH_CHANNEL)
+                print("[TwitchChat] channelId получен: \(channelId!)")
+            }
+            guard let id = channelId else { return }
+            
+            // /helix/channels — получаем название и категорию
+            let chURL = URL(string: "https://api.twitch.tv/helix/channels?broadcaster_id=\(id)")!
+            var chReq = URLRequest(url: chURL)
+            addHelixHeaders(&chReq)
+            let (chData, chResp) = try await URLSession.shared.data(for: chReq)
+            if let http = chResp as? HTTPURLResponse {
+                print("[TwitchChat] helix/channels status: \(http.statusCode)")
+            }
+            let chRespDecoded = try JSONDecoder().decode(ChannelsResponse.self, from: chData)
+            guard let channel = chRespDecoded.data.first else {
+                print("[TwitchChat] helix/channels: пустой ответ data")
+                return
+            }
+            
+            await applyChannel(title: channel.title, gameName: channel.game_name)
+            
+            // /helix/games — получаем box_art_url
+            if !channel.game_id.isEmpty {
+                let gURL = URL(string: "https://api.twitch.tv/helix/games?id=\(channel.game_id)")!
+                var gReq = URLRequest(url: gURL)
+                addHelixHeaders(&gReq)
+                let (gData, gResp) = try await URLSession.shared.data(for: gReq)
+                if let http = gResp as? HTTPURLResponse {
+                    print("[TwitchChat] helix/games status: \(http.statusCode)")
+                }
+                let gRespDecoded = try JSONDecoder().decode(GamesResponse.self, from: gData)
+                let boxTemplate = gRespDecoded.data.first?.box_art_url ?? ""
+                let boxURLString = boxTemplate
+                    .replacingOccurrences(of: "{width}", with: "300")
+                    .replacingOccurrences(of: "{height}", with: "450")
+                let finalURL = URL(string: boxURLString)
+                await applyGameImage(url: finalURL)
+            } else {
+                await applyGameImage(url: nil)
+            }
+        } catch {
+            print("Ошибка обновления информации о стриме: \(error)")
+        }
+    }
+}
+
 extension TwitchChatManager.Message {
     init(sender: String, text: String, badges: [(String, String)], senderColor: Color?, badgeViewData: [BadgeViewData]) {
         self.id = UUID()
@@ -581,7 +790,6 @@ struct DisplayMessage: Identifiable {
 
 extension TwitchChatManager {
     func makeDisplayMessage(_ message: Message, maxWidth: CGFloat, badgeUrlMap: [String: [String: String]]) -> DisplayMessage {
-        // Use badgeViewData directly, do not recalc
         let badgeData = message.badgeViewData
         let parts = parseMessageWithEmotes(message.text)
 #if os(macOS)
@@ -927,4 +1135,3 @@ struct MessageTextView: View {
         }
     }
 }
-
