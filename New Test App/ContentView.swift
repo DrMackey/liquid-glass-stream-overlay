@@ -17,11 +17,19 @@ import AppKit
 
 import SDWebImageSwiftUI // Добавлено для поддержки анимированных gif и webp
 
+// Вспомогательная линейная интерполяция для анимации выреза
+fileprivate func lerp(_ a: CGFloat, _ b: CGFloat, t: CGFloat) -> CGFloat {
+    a + (b - a) * t
+}
 
 struct ContentView: View {
     @StateObject private var capture = CameraCaptureManager()
     @StateObject private var chat = TwitchChatManager()
     @State private var showGlassEffectBar: Bool = false
+
+    // Прогресс анимации выреза маски: 0 — дырка размером со весь контейнер (1920x1080 в вашем окне),
+    // 1 — целевые размеры выреза, как были раньше.
+    @State private var cutoutAnimProgress: CGFloat = 0.0
 
     func badgeViews(_ badges: [(String, String)]) -> [BadgeViewData] {
         let badgeDataArray = badges.map { (set, version) -> BadgeViewData in
@@ -79,9 +87,12 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                .offset(y: showGlassEffectBar ? -500 : 0)
-                .opacity(showGlassEffectBar ? 0 : 1)
-                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: showGlassEffectBar)
+                // Анимация отскока: при показе Glass Bar уходит вверх за экран, при скрытии возвращается
+                .offset(y: showGlassEffectBar ? -geometry.size.height * 1.1 : 0)
+                .animation(
+                    .spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0.1),
+                    value: showGlassEffectBar
+                )
             }
 
             // 3. Glass Bar (карточка с двумя секциями: верх — чат, низ — вырез)
@@ -100,17 +111,56 @@ struct ContentView: View {
                         // Карточка Glass Bar
                         GlassBarContainer(chat: chat)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding()
+                    .background(
+                        // Мягкий материал + очень лёгкое затемнение
+                        Rectangle()
+                            .fill(.clear)
+                            .glassEffect(.regular, in: .rect(cornerRadius: 0))
+                    )
+                    .compositingGroup()
+                    .mask(
+                        GlassBarMaskShape(progress: cutoutAnimProgress)
+                            .fill(.white, style: FillStyle(eoFill: true, antialiased: true))
+                    )
+                    // Overlay синхронизирован тем же progress
+                    .overlay {
+                        GlassBarCutoutOverlay(chat: chat, progress: cutoutAnimProgress)
+                    }
+                    // Прозрачность синхронизирована с прогрессом маски (0 -> 1 и обратно)
+                    .opacity(cutoutAnimProgress)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .onAppear {
+                        // Плавное сжатие выреза и проявление
+                        cutoutAnimProgress = 0
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            cutoutAnimProgress = 1
+                        }
+                    }
+                    .onDisappear {
+                        // Сброс прогресса
+                        cutoutAnimProgress = 0
+                    }
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                // Удалён .transition — старая анимация появления/скрытия отключена
                 .zIndex(1)
             }
         }
         .toolbar {
             Button(showGlassEffectBar ? "Hide Glass Bar" : "Show Glass Bar") {
-                withAnimation {
-                    showGlassEffectBar.toggle()
+                // Управляем только анимацией маски и состоянием панели
+                if showGlassEffectBar {
+                    // Закрытие: сначала анимируем маску и прозрачность, затем скрываем панель
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        cutoutAnimProgress = 0
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        showGlassEffectBar = false
+                    }
+                } else {
+                    // Показ: включаем панель, onAppear запустит анимацию маски и прозрачности
+                    cutoutAnimProgress = 0
+                    showGlassEffectBar = true
                 }
             }
             if let errorMsg = capture.errorMessage {
@@ -213,7 +263,7 @@ private struct VisionSidePanel: View {
     }
 }
 
-// Контейнер карточки Glass Bar: единый материал + сквозной вырез в нижней половине
+// Контейнер карточки Glass Bar: единый материал (вырез и overlay перенесены наружу)
 private struct GlassBarContainer: View {
     @ObservedObject var chat: TwitchChatManager
 
@@ -253,148 +303,7 @@ private struct GlassBarContainer: View {
                 .padding(16)
             }
             .compositingGroup()
-            .mask(
-                GeometryReader { geo in
-                    let size = geo.size
-                    let rect = CGRect(origin: .zero, size: size)
-
-                    let inset: CGFloat = 17
-                    let cutoutCorner: CGFloat = 20
-                    let outerCorner: CGFloat = 30
-                    let lowerHeight = size.height / 2.0
-
-                    let oldY = lowerHeight + inset
-                    let oldHeight = max(0, lowerHeight - inset * 2)
-                    let bottomY = oldY + oldHeight
-
-                    let newY = max(0, oldY - 8)
-                    let newHeight = max(0, bottomY - newY)
-
-                    let cutoutRect = CGRect(
-                        x: inset,
-                        y: newY,
-                        width: max(0, size.width - inset * 2),
-                        height: newHeight
-                    )
-
-                    Canvas { context, _ in
-                        var path = Path()
-                        let outerPath = RoundedRectangle(cornerRadius: outerCorner, style: .continuous).path(in: rect)
-                        path.addPath(outerPath)
-                        let cutoutPath = RoundedRectangle(cornerRadius: cutoutCorner, style: .continuous).path(in: cutoutRect)
-                        path.addPath(cutoutPath)
-                        context.fill(path, with: .color(.white), style: FillStyle(eoFill: true, antialiased: true))
-                    }
-                }
-            )
-            // Overlay: постер + два текстовых блока; фон — только по контенту; текст прижат к низу постера
-            .overlay {
-                GeometryReader { geo in
-                    let size = geo.size
-                    let inset: CGFloat = 17
-                    let lowerHeight = size.height / 2.0
-                    let oldY = lowerHeight + inset
-                    let oldHeight = max(0, lowerHeight - inset * 2)
-                    let bottomY = oldY + oldHeight
-                    let newY = max(0, oldY - 8)
-                    let newHeight = max(0, bottomY - newY)
-                    let cutoutRect = CGRect(
-                        x: inset,
-                        y: newY,
-                        width: max(0, size.width - inset * 2),
-                        height: newHeight
-                    )
-
-                    // Параметры лэйаута
-                    let padding: CGFloat = 16
-                    let maxW = max(0, cutoutRect.width - padding * 2)
-                    let maxH = max(0, cutoutRect.height - padding * 2)
-
-                    // Постер 2:3, уменьшенный в 2 раза
-                    let rawPosterWidth = min(220, maxW * 0.28)
-                    let rawPosterHeight = rawPosterWidth * 1.5
-                    let scale = min(1.0, rawPosterHeight == 0 ? 1.0 : (maxH / rawPosterHeight))
-                    let posterScale: CGFloat = 0.5
-                    let posterWidth = rawPosterWidth * scale * posterScale
-                    let posterHeight = rawPosterHeight * scale * posterScale
-
-                    let spacing: CGFloat = 12
-                    let maxTextWidth = max(0, maxW - posterWidth - spacing)
-                    let glassRadius: CGFloat = 14
-
-                    ZStack(alignment: .bottomLeading) {
-                        HStack(alignment: .bottom, spacing: spacing) {
-                            // Блок постера: реальное изображение категории (или заглушка)
-                            ZStack {
-                                if let url = chat.categoryImageURL {
-                                    AsyncImage(url: url) { phase in
-                                        switch phase {
-                                        case .empty:
-                                            ProgressView()
-                                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                        case .success(let image):
-                                            image
-                                                .resizable()
-                                                .scaledToFill()
-                                        case .failure:
-                                            Image(systemName: "photo")
-                                                .resizable()
-                                                .scaledToFit()
-                                                .foregroundStyle(.white.opacity(0.8))
-                                                .padding(24)
-                                        @unknown default:
-                                            EmptyView()
-                                        }
-                                    }
-                                } else {
-                                    Image(systemName: "photo")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .foregroundStyle(.white.opacity(0.8))
-                                        .padding(24)
-                                }
-                            }
-                            .frame(width: posterWidth, height: posterHeight)
-                            .background(Color.white.opacity(0.06))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
-
-                            // Два текстовых блока: фон строго по контенту (fixedSize + glassEffect ДО frame)
-                            VStack(alignment: .leading, spacing: 8) {
-                                // Название трансляции
-                                Text(chat.streamTitle.isEmpty ? "Название трансляции" : chat.streamTitle)
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .lineLimit(2)
-                                    .truncationMode(.tail)
-                                    .multilineTextAlignment(.leading)
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .fixedSize(horizontal: true, vertical: true) // контентная ширина
-                                    .glassEffect(.regular, in: .rect(cornerRadius: glassRadius))
-                                    .frame(maxWidth: maxTextWidth, alignment: .leading) // ограничиваем максимум
-
-                                // Категория стриминга
-                                Text(chat.categoryName.isEmpty ? "Категория" : chat.categoryName)
-                                    .font(.system(size: 14, weight: .medium))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .foregroundStyle(.white.opacity(0.95))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .fixedSize(horizontal: true, vertical: true)
-                                    .glassEffect(.regular, in: .rect(cornerRadius: glassRadius))
-                                    .frame(maxWidth: maxTextWidth, alignment: .leading)
-                            }
-                        }
-                        .padding(.leading, padding)
-                        .padding(.bottom, padding)
-                    }
-                    .frame(width: cutoutRect.width, height: cutoutRect.height, alignment: .bottomLeading)
-                    .offset(x: cutoutRect.minX, y: cutoutRect.minY)
-                    .allowsHitTesting(false)
-                }
-            }
+            // overlay с постером и текстами теперь на внешнем HStack, чтобы совпадать с вырезом маски
             .shadow(radius: 10)
         }
     }
@@ -647,7 +556,204 @@ struct NotificationBannerView<Content: View>: View {
     }
 }
 
+// Анимируемая Shape-маска с вырезом. progress — animatableData (0...1).
+private struct GlassBarMaskShape: Shape {
+    var progress: CGFloat // 0...1
+
+    // Геометрические параметры (синхронизированы с разметкой)
+    var inset: CGFloat = 17
+    var cutoutCorner: CGFloat = 20
+    var outerCorner: CGFloat = 0
+    var leftPanelWidth: CGFloat = 72
+    var hSpacing: CGFloat = 16
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        // Компенсируем снятый .padding() у родителя:
+        // уменьшаем вырез на один padding со всех сторон
+        let parentPadding: CGFloat = 16
+        let contentRect = rect.insetBy(dx: parentPadding, dy: parentPadding)
+
+        let size = contentRect.size
+
+        let lowerHeight = size.height / 2.0
+        let oldYLocal = lowerHeight + inset
+        let oldHeight = max(0, lowerHeight - inset * 2)
+        let bottomYLocal = oldYLocal + oldHeight
+        let newYLocal = max(0, oldYLocal - 8)
+        let newHeight = max(0, bottomYLocal - newYLocal)
+
+        // Целевой вырез (как раньше), но внутри contentRect
+        let targetCutoutRectLocal = CGRect(
+            x: leftPanelWidth + hSpacing + inset,
+            y: newYLocal,
+            width: max(0, size.width - (leftPanelWidth + hSpacing) - inset * 2),
+            height: newHeight
+        )
+        let targetCutoutRect = targetCutoutRectLocal.offsetBy(dx: contentRect.minX, dy: contentRect.minY)
+
+        // Стартовый вырез — весь contentRect (а не весь rect)
+        let startCutoutRect = contentRect
+
+        let t = max(0, min(1, progress))
+        let animatedCutoutRect = CGRect(
+            x: lerp(startCutoutRect.minX, targetCutoutRect.minX, t: t),
+            y: lerp(startCutoutRect.minY, targetCutoutRect.minY, t: t),
+            width: lerp(startCutoutRect.width, targetCutoutRect.width, t: t),
+            height: lerp(startCutoutRect.height, targetCutoutRect.height, t: t)
+        )
+
+        var p = Path()
+        let outerPath = RoundedRectangle(cornerRadius: outerCorner, style: .continuous).path(in: rect)
+        p.addPath(outerPath)
+        let cutoutPath = RoundedRectangle(cornerRadius: cutoutCorner, style: .continuous).path(in: animatedCutoutRect)
+        p.addPath(cutoutPath)
+        return p
+    }
+}
+
+// Вынесенный overlay для выреза: постер+тексты, привязанный к тем же координатам, что и mask
+private struct GlassBarCutoutOverlay: View {
+    @ObservedObject var chat: TwitchChatManager
+    let progress: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = geo.size
+            let inset: CGFloat = 17
+            let parentPadding: CGFloat = 16
+
+            // Рабочая область внутри одного внешнего padding
+            let contentRect = CGRect(origin: .zero, size: size).insetBy(dx: parentPadding, dy: parentPadding)
+            let contentSize = contentRect.size
+
+            let lowerHeight = contentSize.height / 2.0
+            let oldYLocal = lowerHeight + inset
+            let oldHeight = max(0, lowerHeight - inset * 2)
+            let bottomYLocal = oldYLocal + oldHeight
+            let newYLocal = max(0, oldYLocal - 8)
+            let newHeight = max(0, bottomYLocal - newYLocal)
+
+            // Синхронизировано с лэйаутом HStack: левая панель 72 и spacing 16
+            let leftPanelWidth: CGFloat = 72
+            let hSpacing: CGFloat = 16
+
+            // Целевой вырез внутри contentRect
+            let targetCutoutRectLocal = CGRect(
+                x: leftPanelWidth + hSpacing + inset,
+                y: newYLocal,
+                width: max(0, contentSize.width - (leftPanelWidth + hSpacing) - inset * 2),
+                height: newHeight
+            )
+            let targetCutoutRect = targetCutoutRectLocal.offsetBy(dx: contentRect.minX, dy: contentRect.minY)
+
+            // Стартовый вырез — весь contentRect
+            let startCutoutRect = contentRect
+
+            let t = max(0, min(1, progress))
+            let animatedCutoutRect = CGRect(
+                x: lerp(startCutoutRect.minX, targetCutoutRect.minX, t: t),
+                y: lerp(startCutoutRect.minY, targetCutoutRect.minY, t: t),
+                width: lerp(startCutoutRect.width, targetCutoutRect.width, t: t),
+                height: lerp(startCutoutRect.height, targetCutoutRect.height, t: t)
+            )
+
+            // Параметры лэйаута
+            let padding: CGFloat = 16
+            let maxW = max(0, animatedCutoutRect.width - padding * 2)
+            let maxH = max(0, animatedCutoutRect.height - padding * 2)
+
+            // Постер 2:3, уменьшенный в 2 раза
+            let rawPosterWidth = min(220, maxW * 0.28)
+            let rawPosterHeight = rawPosterWidth * 1.5
+            let scale = min(1.0, rawPosterHeight == 0 ? 1.0 : (maxH / rawPosterHeight))
+            let posterScale: CGFloat = 0.5
+            let posterWidth = rawPosterWidth * scale * posterScale
+            let posterHeight = rawPosterHeight * scale * posterScale
+
+            let spacing: CGFloat = 12
+            let maxTextWidth = max(0, maxW - posterWidth - spacing)
+            let glassRadius: CGFloat = 14
+
+            ZStack(alignment: .bottomLeading) {
+                HStack(alignment: .bottom, spacing: spacing) {
+                    // Блок постера: реальное изображение категории (или заглушка)
+                    ZStack {
+                        if let url = chat.categoryImageURL {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .empty:
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                case .failure:
+                                    Image(systemName: "photo")
+                                        .resizable()
+                                        .scaledToFit()
+                                        .foregroundStyle(.white.opacity(0.8))
+                                        .padding(24)
+                                @unknown default:
+                                    EmptyView()
+                                }
+                            }
+                        } else {
+                            Image(systemName: "photo")
+                                .resizable()
+                                .scaledToFit()
+                                .foregroundStyle(.white.opacity(0.8))
+                                .padding(24)
+                        }
+                    }
+                    .frame(width: posterWidth, height: posterHeight)
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
+
+                    // Два текстовых блока: фон строго по контенту (fixedSize + glassEffect ДО frame)
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Название трансляции
+                        Text(chat.streamTitle.isEmpty ? "Название трансляции" : chat.streamTitle)
+                            .font(.system(size: 18, weight: .semibold))
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                            .multilineTextAlignment(.leading)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .fixedSize(horizontal: true, vertical: true) // контентная ширина
+                            .glassEffect(.regular, in: .rect(cornerRadius: glassRadius))
+                            .frame(maxWidth: maxTextWidth, alignment: .leading) // ограничиваем максимум
+
+                        // Категория стриминга
+                        Text(chat.categoryName.isEmpty ? "Категория" : chat.categoryName)
+                            .font(.system(size: 14, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .foregroundStyle(.white.opacity(0.95))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .fixedSize(horizontal: true, vertical: true)
+                            .glassEffect(.regular, in: .rect(cornerRadius: glassRadius))
+                            .frame(maxWidth: maxTextWidth, alignment: .leading)
+                    }
+                }
+                .padding(.leading, padding)
+                .padding(.bottom, padding)
+            }
+            .frame(width: animatedCutoutRect.width, height: animatedCutoutRect.height, alignment: .bottomLeading)
+            .offset(x: animatedCutoutRect.minX, y: animatedCutoutRect.minY)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
 #Preview {
     ContentView()
 }
-
