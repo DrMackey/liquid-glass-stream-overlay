@@ -10,7 +10,7 @@ import AppKit
 import UIKit
 #endif
 
-let TWITCH_CHANNEL = "NikiWrightG"
+let TWITCH_CHANNEL = "PWGood"
 
 // Константы Helix API (по примеру curl: Client-Id + Bearer)
 // При необходимости подставьте свои значения.

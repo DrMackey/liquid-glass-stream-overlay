@@ -22,6 +22,11 @@ fileprivate func lerp(_ a: CGFloat, _ b: CGFloat, t: CGFloat) -> CGFloat {
     a + (b - a) * t
 }
 
+// Функция easeInOut для плавной анимации
+fileprivate func easeInOut(_ t: CGFloat) -> CGFloat {
+    t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
+}
+
 struct ContentView: View {
     @StateObject private var capture = CameraCaptureManager()
     @StateObject private var chat = TwitchChatManager()
@@ -131,9 +136,9 @@ struct ContentView: View {
                     .opacity(cutoutAnimProgress)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .onAppear {
-                        // Плавное сжатие выреза и проявление
+                        // Плавное сжатие выреза и проявление с easeInOut
                         cutoutAnimProgress = 0
-                        withAnimation(.easeInOut(duration: 0.3)) {
+                        withAnimation(.timingCurve(0.42, 0, 0.58, 1, duration: 0.4)) {
                             cutoutAnimProgress = 1
                         }
                     }
@@ -151,10 +156,10 @@ struct ContentView: View {
                 // Управляем только анимацией маски и состоянием панели
                 if showGlassEffectBar {
                     // Закрытие: сначала анимируем маску и прозрачность, затем скрываем панель
-                    withAnimation(.easeInOut(duration: 0.3)) {
+                    withAnimation(.timingCurve(0.42, 0, 0.58, 1, duration: 0.4)) {
                         cutoutAnimProgress = 0
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         showGlassEffectBar = false
                     }
                 } else {
@@ -600,11 +605,14 @@ private struct GlassBarMaskShape: Shape {
         let startCutoutRect = contentRect
 
         let t = max(0, min(1, progress))
+        // Применяем easeInOut для плавной анимации
+        let easedT = easeInOut(t)
+        
         let animatedCutoutRect = CGRect(
-            x: lerp(startCutoutRect.minX, targetCutoutRect.minX, t: t),
-            y: lerp(startCutoutRect.minY, targetCutoutRect.minY, t: t),
-            width: lerp(startCutoutRect.width, targetCutoutRect.width, t: t),
-            height: lerp(startCutoutRect.height, targetCutoutRect.height, t: t)
+            x: lerp(startCutoutRect.minX, targetCutoutRect.minX, t: easedT),
+            y: lerp(startCutoutRect.minY, targetCutoutRect.minY, t: easedT),
+            width: lerp(startCutoutRect.width, targetCutoutRect.width, t: easedT),
+            height: lerp(startCutoutRect.height, targetCutoutRect.height, t: easedT)
         )
 
         var p = Path()
@@ -655,11 +663,14 @@ private struct GlassBarCutoutOverlay: View {
             let startCutoutRect = contentRect
 
             let t = max(0, min(1, progress))
+            // Применяем ту же функцию easeInOut для синхронизации с маской
+            let easedT = easeInOut(t)
+            
             let animatedCutoutRect = CGRect(
-                x: lerp(startCutoutRect.minX, targetCutoutRect.minX, t: t),
-                y: lerp(startCutoutRect.minY, targetCutoutRect.minY, t: t),
-                width: lerp(startCutoutRect.width, targetCutoutRect.width, t: t),
-                height: lerp(startCutoutRect.height, targetCutoutRect.height, t: t)
+                x: lerp(startCutoutRect.minX, targetCutoutRect.minX, t: easedT),
+                y: lerp(startCutoutRect.minY, targetCutoutRect.minY, t: easedT),
+                width: lerp(startCutoutRect.width, targetCutoutRect.width, t: easedT),
+                height: lerp(startCutoutRect.height, targetCutoutRect.height, t: easedT)
             )
 
             // Параметры лэйаута
