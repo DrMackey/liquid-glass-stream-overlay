@@ -58,11 +58,3 @@ struct GlassBarMaskShape: Shape {
         return p
     }
 }
-
-private func lerp(_ a: CGFloat, _ b: CGFloat, t: CGFloat) -> CGFloat {
-    return a + (b - a) * t
-}
-
-private func easeInOut(_ t: CGFloat) -> CGFloat {
-    return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t
-}

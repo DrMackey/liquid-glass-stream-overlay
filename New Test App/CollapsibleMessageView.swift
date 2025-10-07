@@ -2,6 +2,11 @@
 // Отрисовка одного сообщения с поддержкой каскадного состояния
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 struct MessageLayout {
     let message: DisplayMessage
@@ -280,3 +285,4 @@ struct CollapsibleMessageView: View {
             .animation(.spring(response: 0.9, dampingFraction: 0.7), value: layout.isCollapsed)
     }
 }
+
