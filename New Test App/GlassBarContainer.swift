@@ -56,12 +56,25 @@ struct GlassUnlockPromptView: View {
                 .background(Color.clear)
                 .glassEffect(.regular, in: .rect(cornerRadius: 20))
 
-            Text("разблокируйте Вебкамеру")
-                .font(.title3)
-                .multilineTextAlignment(.center)
-                .foregroundColor(.primary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 20)
+            VStack(spacing: 8) {
+                HStack { Spacer(minLength: 0)
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 125, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .symbolRenderingMode(.hierarchical)
+                        .opacity(0.25)
+                    Spacer(minLength: 0) }
+                
+                Text("РАЗБЛОКИРУЙТЕ ВЕБКАМЕРУ\nЗА БАЛЛЫ КАНАЛА")
+                    .font(.system(size: 24, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .opacity(0.25)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 20)
         }
     }
 }
+
