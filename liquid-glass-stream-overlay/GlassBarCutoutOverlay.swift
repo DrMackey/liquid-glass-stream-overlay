@@ -53,7 +53,7 @@ struct GlassBarCutoutOverlay: View {
             let rawPosterWidth = min(220, maxW * 0.28)
             let rawPosterHeight = rawPosterWidth * 1.5
             let scale = min(1.0, rawPosterHeight == 0 ? 1.0 : (maxH / rawPosterHeight))
-            let posterScale: CGFloat = 0.5
+            let posterScale: CGFloat = 0.8
             let posterWidth = rawPosterWidth * scale * posterScale
             let posterHeight = rawPosterHeight * scale * posterScale
 
@@ -95,23 +95,37 @@ struct GlassBarCutoutOverlay: View {
                     .frame(width: posterWidth, height: posterHeight)
                     .background(Color.white.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.35), Color.white.opacity(0.05)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 0.5
+                            )
+                            .blendMode(.overlay)
+                    )
                     .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text(chat.streamTitle.isEmpty ? "Название трансляции" : chat.streamTitle)
-                            .font(.system(size: 18, weight: .semibold))
-                            .lineLimit(2)
-                            .truncationMode(.tail)
+                            .font(.system(size: 28, weight: .semibold))
+                            .lineLimit(3) // allow up to 3 lines to wrap within the cutout
                             .multilineTextAlignment(.leading)
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
-                            .fixedSize(horizontal: true, vertical: true)
                             .glassEffect(.regular, in: .rect(cornerRadius: glassRadius))
                             .frame(maxWidth: maxTextWidth, alignment: .leading)
 
                         Text(chat.categoryName.isEmpty ? "Категория" : chat.categoryName)
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 24, weight: .medium))
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .foregroundStyle(.white.opacity(0.95))

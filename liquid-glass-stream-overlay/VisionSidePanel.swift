@@ -19,8 +19,6 @@ struct VisionSidePanel: View {
                 let symbol = icons[idx]
                 Circle()
                     .fill(Color.clear)
-                    .background(Color.clear)
-                    .glassEffect(.regular, in: .circle)
                     .overlay(
                         Image(systemName: symbol)
                             .font(.system(size: 18, weight: .semibold))
@@ -28,6 +26,16 @@ struct VisionSidePanel: View {
                             .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
                     )
                     .frame(width: 48, height: 48)
+                    .background(
+                        Group {
+                            if idx == 0 {
+                                Color.clear
+                                    .glassEffect(.regular, in: .circle)
+                            } else {
+                                Color.clear
+                            }
+                        }
+                    )
                     .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
                     #if os(macOS)
                     .onHover { isHover in
@@ -44,7 +52,7 @@ struct VisionSidePanel: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(width: 72, alignment: .center)
         .background(
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
+            RoundedRectangle(cornerRadius: 100, style: .continuous)
                 .fill(Color.clear)
                 .background(Color.clear)
                 .glassEffect(.regular, in: .rect(cornerRadius: 30))
@@ -52,3 +60,4 @@ struct VisionSidePanel: View {
         .shadow(radius: 10)
     }
 }
+

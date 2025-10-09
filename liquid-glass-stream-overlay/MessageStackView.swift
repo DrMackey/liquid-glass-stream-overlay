@@ -19,7 +19,17 @@ struct MessageStackView: View {
     }
 
     private var messageItems: [Item] {
-        let displays = messages.map { chat.makeDisplayMessage($0, maxWidth: maxWidth * 1000, badgeUrlMap: chat.allBadgeImages) }
+        let displays: [DisplayMessage] = messages.map { msg in
+            let parts = chat.parseMessageWithEmotes(msg.text)
+            let display = DisplayMessage(
+                badges: msg.badgeViewData,
+                sender: msg.sender,
+                senderColor: msg.sender == "system" ? .gray : (msg.senderColor ?? .red),
+                visibleParts: parts,
+                isTruncated: false
+            )
+            return display
+        }
         return displays.map { Item(display: $0, height: estimateMessageHeight($0, maxWidth: maxWidth)) }
     }
 
