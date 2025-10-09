@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  New Test App
+//  liquid-glass-stream-overlay
 //
 //  Created by Rodney Mackey on 09.08.2025.
 //
