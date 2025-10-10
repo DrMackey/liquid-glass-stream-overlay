@@ -136,6 +136,8 @@
 /* Begin XCBuildConfiguration section */
 		E4B1AD292E479A33006EBE1F /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = E4B1AD222E479A31006EBE1F /* liquid-glass-stream-overlay */;
+			baseConfigurationReferenceRelativePath = TwitchSecrets.xcconfig;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -199,6 +201,8 @@
 		};
 		E4B1AD2A2E479A33006EBE1F /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = E4B1AD222E479A31006EBE1F /* liquid-glass-stream-overlay */;
+			baseConfigurationReferenceRelativePath = TwitchSecrets.xcconfig;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;

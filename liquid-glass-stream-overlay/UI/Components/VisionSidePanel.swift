@@ -61,3 +61,6 @@ struct VisionSidePanel: View {
     }
 }
 
+#Preview {
+    VisionSidePanel()
+}

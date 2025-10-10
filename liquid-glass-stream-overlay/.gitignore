@@ -38,6 +38,9 @@ fastlane/Preview.html
 .env
 .env.*
 
+# Secrets / build configuration files
+TwitchSecrets.xcconfig
+
 # Other
 *.swp
 *.swo

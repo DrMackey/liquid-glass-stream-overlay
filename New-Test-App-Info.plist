@@ -7,5 +7,11 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>TWITCH_CHANNEL</key>
+	<string>$(TWITCH_CHANNEL)</string>
+	<key>TWITCH_HELIX_BEARER_TOKEN</key>
+	<string>$(TWITCH_HELIX_BEARER_TOKEN)</string>
+	<key>TWITCH_HELIX_CLIENT_ID</key>
+	<string>$(TWITCH_HELIX_CLIENT_ID)</string>
 </dict>
 </plist>

@@ -9,5 +9,11 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Это приложение использует камеру для видеотрансляции.</string>
+<key>TWITCH_CHANNEL</key>
+<string>$(TWITCH_CHANNEL)</string>
+<key>TWITCH_HELIX_CLIENT_ID</key>
+<string>$(TWITCH_HELIX_CLIENT_ID)</string>
+<key>TWITCH_HELIX_BEARER_TOKEN</key>
+<string>$(TWITCH_HELIX_BEARER_TOKEN)</string>
 </dict>
 </plist>
