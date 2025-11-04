@@ -77,4 +77,3 @@ struct GlassUnlockPromptView: View {
         }
     }
 }
-

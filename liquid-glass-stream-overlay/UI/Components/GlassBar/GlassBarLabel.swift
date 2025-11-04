@@ -5,6 +5,9 @@ import SwiftUI
 
 struct GlassBarLabel: View {
     @ObservedObject var chat: TwitchChatManager
+    // New external animation transition parameters with sensible defaults matching previous behavior
+    var insertionTransition: AnyTransition = .scale.combined(with: .opacity)
+    var removalTransition: AnyTransition = .move(edge: .bottom).combined(with: .opacity)
     let stackingThreshold: CGFloat = 200
     let maxVisibleMessages = 12
     let spacing: CGFloat = 16
@@ -54,7 +57,7 @@ struct GlassBarLabel: View {
                     )
                     .matchedGeometryEffect(id: message.id, in: messageAnim)
                     .offset(y: y)
-                    .transition(.asymmetric(insertion: .scale.combined(with: .opacity), removal: .move(edge: .bottom).combined(with: .opacity)))
+                    .transition(.asymmetric(insertion: insertionTransition, removal: removalTransition))
                     .background(
                         GeometryReader { geoMsg in
                             Color.clear

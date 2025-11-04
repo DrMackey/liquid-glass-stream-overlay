@@ -9,6 +9,12 @@ import Network
 import SDWebImageSwiftUI
 import AppKit
 
+// Глобальная функция: получение идентификатора канала по логину через Helix /users
+func fetchChannelId(login: String) async throws -> String {
+    // Для совместимости оставляем функцию, но используем кэш менеджера
+    return try await TwitchChatManager.sharedChannelId(login: login)
+}
+
 class Config {
     static let shared = Config()
     
@@ -35,46 +41,6 @@ let TWITCH_HELIX_BEARER_TOKEN = Config.shared.TwitchHelixBearerToken
 enum MessagePart: Hashable {
     case text(String) // Обычный текст
     case emote(name: String, url: String, animated: Bool) // Эмоут с URL и признаком анимации
-}
-
-// Модель 7TV эмоута для декодирования API и генерации URL
-/// Структура для парсинга одной эмоуты 7TV
-struct STVEmote: Decodable, Hashable {
-    let name: String
-    let id: String
-    let host: Host
-    struct Host: Decodable, Hashable {
-        let url: String
-        let files: [File]
-        struct File: Decodable, Hashable {
-            let name: String
-            let format: String
-            let width: Int?
-            let height: Int?
-        }
-    }
-    // Формирует прямой URL до файла эмоута указанного формата
-    /// Генерация URL для разных размеров и форматов
-    func url(size: String, format: String) -> String? {
-        // Пример URL: https://cdn.7tv.app/emote/{id}/{size}
-        let base = host.url.hasPrefix("http") ? host.url : ("https:" + host.url)
-        // Обычно webp
-        let f = host.files.first { $0.format.uppercased() == format }
-        guard let file = f else { return nil }
-        return "\(base)/\(file.name)"
-    }
-}
-
-// Модель эмоута Twitch (Helix chat/emotes)
-/// Структура для парсинга твитч эмоут
-struct Emote: Decodable, Hashable {
-    let id: String
-    let name: String
-    let images: Images
-    let format: [String]?
-    struct Images: Decodable, Hashable {
-        let url_1x: String
-    }
 }
 
 // MARK: - Отображение эмоутов (анимированные и статичные)
@@ -152,6 +118,43 @@ struct BadgeViewData: Identifiable, Hashable, Equatable {
 
 // MARK: - Основной менеджер чата Twitch (IRC + Helix + эмоута)
 final class TwitchChatManager: ObservableObject {
+    // Кэш channelId для всех обращений, чтобы запрашивать его только один раз
+    private static var cachedChannelId: String? = nil
+    private static var channelIdTask: Task<String, Error>? = nil
+
+    /// Единая точка получения channelId с кэшем и дедупликацией запросов
+    static func sharedChannelId(login: String) async throws -> String {
+        if let id = cachedChannelId { return id }
+        if let task = channelIdTask { return try await task.value }
+        let task = Task<String, Error> {
+            // ВАЖНО: Twitch логины — в нижнем регистре
+            let url = URL(string: "https://api.twitch.tv/helix/users?login=\(login.lowercased())")!
+            var req = URLRequest(url: url)
+            req.addValue("Bearer \(TWITCH_HELIX_BEARER_TOKEN)", forHTTPHeaderField: "Authorization")
+            req.addValue(TWITCH_HELIX_CLIENT_ID, forHTTPHeaderField: "Client-Id")
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            if let http = resp as? HTTPURLResponse {
+                print("[TwitchChat] helix/users status: \(http.statusCode)")
+            }
+            struct UsersResponse: Decodable { struct User: Decodable { let id: String }; let data: [User] }
+            let decoded = try JSONDecoder().decode(UsersResponse.self, from: data)
+            guard let id = decoded.data.first?.id else {
+                throw URLError(.badServerResponse)
+            }
+            return id
+        }
+        channelIdTask = task
+        do {
+            let id = try await task.value
+            cachedChannelId = id
+            channelIdTask = nil
+            return id
+        } catch {
+            channelIdTask = nil
+            throw error
+        }
+    }
+
     // Внутренняя модель информации о бейдже
     struct BadgeInfo: Hashable {
         let set: String
@@ -178,10 +181,28 @@ final class TwitchChatManager: ObservableObject {
             lhs.badgeViewData == rhs.badgeViewData
         }
     }
+    struct Notification: Equatable, Identifiable {
+        let id: UUID
+        let sender: String
+        let text: String
+        let badges: [(String, String)]
+        let senderColor: Color?
+        let badgeViewData: [BadgeViewData]
+        
+        static func == (lhs: Notification, rhs: Notification) -> Bool {
+            lhs.id == rhs.id &&
+            lhs.sender == rhs.sender &&
+            lhs.text == rhs.text &&
+            lhs.badges.elementsEqual(rhs.badges, by: { $0.0 == $1.0 && $0.1 == $1.1 }) &&
+            lhs.senderColor == rhs.senderColor &&
+            lhs.badgeViewData == rhs.badgeViewData
+        }
+    }
 
     // Паблишед-состояния для UI: последнее сообщение, история, карты эмоутов и бейджей
     @Published var lastMessage: Message?
     @Published var messages: [Message] = []
+    @Published var notifications: [Notification] = []
 
     @Published var allBadgeImages: [String: [String: String]] = [:]
     @Published var emoteMap: [String: String] = [:]
@@ -208,6 +229,12 @@ final class TwitchChatManager: ObservableObject {
     // Task для обновления информации о стриме
     private var streamInfoTask: Task<Void, Never>?
 
+    // MARK: - EventSub (WebSocket)
+    private var eventSubWebSocketTask: URLSessionWebSocketTask?
+    private var eventSubSessionId: String?
+    private let eventSubURL = URL(string: "wss://eventsub.wss.twitch.tv/ws")!
+    private let urlSession = URLSession(configuration: .default)
+
     // Инициализация: запуск фонового цикла обновления информации о стриме
     init() {
         print("[TwitchChat] init()")
@@ -215,6 +242,8 @@ final class TwitchChatManager: ObservableObject {
         streamInfoTask = Task { [weak self] in
             await self?.runStreamInfoLoop()
         }
+        // Запускаем EventSub WebSocket при старте приложения
+        startEventSubWebSocket()
     }
 
     // Очистка: отмена фоновой задачи
@@ -425,6 +454,9 @@ final class TwitchChatManager: ObservableObject {
         displayTimer?.invalidate()
         displayTimer = nil
         pendingMessage = nil
+        // Останавливаем EventSub WebSocket
+        eventSubWebSocketTask?.cancel(with: .goingAway, reason: nil)
+        eventSubWebSocketTask = nil
         // Останавливаем фоновые обновления информации о стриме
         streamInfoTask?.cancel()
         streamInfoTask = nil // чтобы в start() можно было создать новую задачу
@@ -691,6 +723,213 @@ final class TwitchChatManager: ObservableObject {
     }
 }
 
+extension TwitchChatManager {
+    /// Рекурсивный поиск строкового значения по ключу в произвольном JSON (Dictionary/Array)
+    private func findStringValue(forKey targetKey: String, in json: Any) -> String? {
+        if let dict = json as? [String: Any] {
+            for (key, value) in dict {
+                if key == targetKey {
+                    if let str = value as? String { return str }
+                    if let num = value as? NSNumber { return num.stringValue }
+                }
+                if let found = findStringValue(forKey: targetKey, in: value) { return found }
+            }
+        } else if let array = json as? [Any] {
+            for item in array {
+                if let found = findStringValue(forKey: targetKey, in: item) { return found }
+            }
+        }
+        return nil
+    }
+
+    /// Чистая функция: подключается к EventSub WebSocket, обрабатывает welcome, пинг/понг и подписки.
+    func startEventSubWebSocket() {
+        // Если уже есть активная задача — не дублируем
+        if let task = eventSubWebSocketTask {
+            switch task.state {
+            case .running, .suspended:
+                return
+            default: break
+            }
+        }
+        let task = urlSession.webSocketTask(with: eventSubURL)
+        eventSubWebSocketTask = task
+        task.resume()
+        listenEventSubMessages()
+    }
+
+    /// Рекурсивное чтение сообщений из WS и обработка типов (welcome/notification/keepalive/ping)
+    private func listenEventSubMessages() {
+        eventSubWebSocketTask?.receive { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .failure(let error):
+                print("[EventSub] receive error: \(error)")
+                // Пробуем переподключиться через небольшую паузу
+                DispatchQueue.global().asyncAfter(deadline: .now() + 2) { self.reconnectEventSub() }
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    self.handleEventSubJSONString(text)
+                case .data(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        self.handleEventSubJSONString(text)
+                    } else {
+                        print("[EventSub] binary message (non-utf8) size=\(data.count)")
+                    }
+                @unknown default:
+                    break
+                }
+                // Продолжаем слушать
+                self.listenEventSubMessages()
+            }
+        }
+    }
+
+    /// Обработка текстового JSON сообщения EventSub
+    private func handleEventSubJSONString(_ text: String) {
+        // Печатаем всё, что приходит, для отладки
+        print("[EventSub] <- \(text)")
+        struct Envelope: Decodable {
+            struct Metadata: Decodable { let message_type: String }
+            struct Payload: Decodable {
+                struct Session: Decodable { let id: String? }
+                let session: Session?
+                // Для нотификаций Twitch присылает поле `event` и `subscription`, но для нашей печати достаточно словаря
+            }
+            let metadata: Metadata
+            let payload: Payload?
+        }
+        // Пинг/понг на уровне WS: Twitch для keepalive может прислать ping кадр, URLSession сам вызовет .receive(.ping),
+        // но на практике Twitch EventSub посылает keepalive-сообщения. Мы также ответим на WS ping, если придёт.
+        // URLSessionWebSocketTask автоматически отвечает на .ping только по нашему вызову sendPing. Обработаем вручную ниже.
+
+        // Попробуем декодировать конверт, чтобы вытащить welcome
+        if let data = text.data(using: .utf8), let env = try? JSONDecoder().decode(Envelope.self, from: data) {
+            let type = env.metadata.message_type
+            if type == "session_welcome" {
+                if let id = env.payload?.session?.id {
+                    self.eventSubSessionId = id
+                    print("[EventSub] session_welcome. session_id=\(id)")
+                    // После welcome отправляем подписку
+                    Task { await self.subscribeToEventSub(sessionId: id) }
+                }
+            } else if type == "notification" {
+                
+                // Разбираем JSON и распределяем значения по полям моделей
+                let jsonAny: Any? = {
+                    if let data = text.data(using: .utf8) {
+                        return try? JSONSerialization.jsonObject(with: data, options: [])
+                    }
+                    return nil
+                }()
+                // Извлекаем значения по ключам (могут быть глубоко вложены)
+                let messageIdStr = jsonAny.flatMap { findStringValue(forKey: "message_id", in: $0) }
+                let userNameStr = jsonAny.flatMap { findStringValue(forKey: "user_name", in: $0) }
+                let titleStr = jsonAny.flatMap { findStringValue(forKey: "title", in: $0) }
+                // Готовим значения с запасными вариантами
+                let computedId = messageIdStr.flatMap { UUID(uuidString: $0) } ?? UUID()
+                let sender = userNameStr ?? "eventsub"
+                let baseText: String = {
+                    if let t = titleStr, !t.isEmpty { return t } else {
+                        return text.count > 120 ? String(text.prefix(120)) + "…" : text
+                    }
+                }()
+                let messageText = "Получена награда — \(baseText)"
+                let badgeData = self.badgeViews(from: [], badgeUrlMap: self.allBadgeImages)
+                let notif = Notification(id: computedId, sender: sender, text: messageText, badges: [], senderColor: .gray, badgeViewData: badgeData)
+                let msg = Message(id: UUID(), sender: sender, text: messageText, badges: [], senderColor: .gray, badgeViewData: badgeData)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.notifications.append(notif)
+                    self.messages.append(msg)
+                    if self.messages.count > 20 { self.messages.removeFirst(self.messages.count - 20) }
+                }
+            } else if type == "session_keepalive" {
+                // Можно логировать или обновлять таймер
+                print("[EventSub] keepalive")
+            } else if type == "session_reconnect" {
+                print("[EventSub] reconnect requested")
+                reconnectEventSub()
+            }
+        }
+    }
+
+    /// Отправка pong при необходимости (если придёт ping кадр на уровне WS)
+    private func sendEventSubPong() {
+        eventSubWebSocketTask?.sendPing { error in
+            if let error { print("[EventSub] ping/pong send error: \(error)") }
+        }
+    }
+
+    /// Принудительное переподключение WS
+    private func reconnectEventSub() {
+        eventSubWebSocketTask?.cancel(with: .goingAway, reason: nil)
+        eventSubWebSocketTask = nil
+        startEventSubWebSocket()
+    }
+
+    /// Отправка подписки на EventSub (пример: channel.follow v2)
+    private func buildEventSubSubscriptionBody(sessionId: String, userId: String) throws -> Data {
+        struct Body: Encodable {
+            struct Condition: Encodable { let broadcaster_user_id: String; let moderator_user_id: String; let user_id: String }
+            struct Transport: Encodable { let method: String; let session_id: String }
+            let type: String
+            let version: String
+            let condition: Condition
+            let transport: Transport
+        }
+        let body = Body(
+            type: "channel.channel_points_custom_reward_redemption.add",
+            version: "1",
+            condition: .init(broadcaster_user_id: userId, moderator_user_id: "84011517", user_id: "84011517"),
+            transport: .init(method: "websocket", session_id: sessionId)
+        )
+        return try JSONEncoder().encode(body)
+    }
+
+    /// Выполнение POST /helix/eventsub/subscriptions c нужными заголовками
+    private func subscribeToEventSub(sessionId: String) async {
+        // В качестве примера берём user_id (84011517) как channelId (если есть), иначе пробуем получить
+        var targetUserId: String = self.channelId ?? ""
+        if targetUserId.isEmpty {
+            if let id = try? await TwitchChatManager.sharedChannelId(login: TWITCH_CHANNEL) { targetUserId = id }
+        }
+        guard !targetUserId.isEmpty else {
+            print("[EventSub] Не удалось определить user_id для подписки")
+            return
+        }
+        let url = URL(string: "https://api.twitch.tv/helix/eventsub/subscriptions")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.addValue("Bearer \(TWITCH_HELIX_BEARER_TOKEN)", forHTTPHeaderField: "Authorization")
+        req.addValue(TWITCH_HELIX_CLIENT_ID, forHTTPHeaderField: "Client-Id")
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        do {
+            // Ensure JSON body and log it for debugging
+            let bodyData = try buildEventSubSubscriptionBody(sessionId: sessionId, userId: targetUserId)
+            // Try to pretty-print JSON for logging to verify it's valid JSON
+            if let jsonObject = try? JSONSerialization.jsonObject(with: bodyData, options: []),
+               let prettyData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted]),
+               let prettyString = String(data: prettyData, encoding: .utf8) {
+                print("[EventSub] subscribe request body (JSON):\n\(prettyString)")
+            } else if let rawString = String(data: bodyData, encoding: .utf8) {
+                print("[EventSub] subscribe request body (raw): \(rawString)")
+            }
+            req.httpBody = bodyData
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            if let http = resp as? HTTPURLResponse {
+                print("[EventSub] subscribe status: \(http.statusCode)")
+            }
+            if let body = String(data: data, encoding: .utf8) {
+                print("[EventSub] subscribe response: \(body)")
+            }
+        } catch {
+            print("[EventSub] subscribe error: \(error)")
+        }
+    }
+}
+
 // MARK: - Stream Info (название стрима, категория, постер категории)
 extension TwitchChatManager {
     // Ответ Helix: пользователи/каналы/игры
@@ -720,7 +959,7 @@ extension TwitchChatManager {
     fileprivate func runStreamInfoLoop() async {
         print("[TwitchChat] runStreamInfoLoop() start. channelId=\(channelId ?? "nil")")
         if channelId == nil {
-            if let id = try? await fetchChannelId(login: TWITCH_CHANNEL) {
+            if let id = try? await TwitchChatManager.sharedChannelId(login: TWITCH_CHANNEL) {
                 print("[TwitchChat] fetched channelId=\(id)")
                 self.channelId = id
             } else {
@@ -733,23 +972,6 @@ extension TwitchChatManager {
             try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
         }
         print("[TwitchChat] runStreamInfoLoop() cancelled")
-    }
-    
-    // Получение идентификатора канала по логину через Helix /users
-    private func fetchChannelId(login: String) async throws -> String {
-        // ВАЖНО: Twitch логины — в нижнем регистре
-        let url = URL(string: "https://api.twitch.tv/helix/users?login=\(login.lowercased())")!
-        var req = URLRequest(url: url)
-        addHelixHeaders(&req)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        if let http = resp as? HTTPURLResponse {
-            print("[TwitchChat] helix/users status: \(http.statusCode)")
-        }
-        let decoded = try JSONDecoder().decode(UsersResponse.self, from: data)
-        guard let id = decoded.data.first?.id else {
-            throw URLError(.badServerResponse)
-        }
-        return id
     }
     
     // Применяет заголовок и категорию в @Published полях (MainActor)
@@ -780,7 +1002,7 @@ extension TwitchChatManager {
         do {
             if channelId == nil {
                 print("[TwitchChat] channelId отсутствует — пробуем получить")
-                channelId = try await fetchChannelId(login: TWITCH_CHANNEL)
+                channelId = try await TwitchChatManager.sharedChannelId(login: TWITCH_CHANNEL)
                 print("[TwitchChat] channelId получен: \(channelId!)")
             }
             guard let id = channelId else { return }
@@ -838,6 +1060,17 @@ extension TwitchChatManager.Message {
     }
 }
 
+extension TwitchChatManager.Notification {
+    init(sender: String, text: String, badges: [(String, String)], senderColor: Color?, badgeViewData: [BadgeViewData]) {
+        self.id = UUID()
+        self.sender = sender
+        self.text = text
+        self.badges = badges
+        self.senderColor = senderColor
+        self.badgeViewData = badgeViewData
+    }
+}
+
 // Представление сообщения для отображения (с рассчитанными частями и усечением)
 struct DisplayMessage: Identifiable {
     let id = UUID()
@@ -848,315 +1081,11 @@ struct DisplayMessage: Identifiable {
     let isTruncated: Bool
 }
 
-extension TwitchChatManager {
-    // MARK: - Подготовка отображаемого сообщения и расчёт видимых частей
-    func makeDisplayMessage(_ message: Message, maxWidth: CGFloat, badgeUrlMap: [String: [String: String]]) -> DisplayMessage {
-        // Выбор платформенного шрифта для замеров
-        let badgeData = message.badgeViewData
-        let parts = parseMessageWithEmotes(message.text)
-        let font = NSFont.systemFont(ofSize: 32, weight: .bold)
-        // Вычисляем какие части помещаются в доступной ширине
-        let (visibleParts, isTruncated) = calculateVisibleParts(parts: parts, font: font, maxWidth: maxWidth)
-        return DisplayMessage(
-            badges: badgeData,
-            sender: message.sender,
-            senderColor: message.sender == "system" ? .gray : (message.senderColor ?? .red),
-            visibleParts: visibleParts,
-            isTruncated: isTruncated
-        )
-    }
-    // Подсчёт ширины частей и бинарный поиск по длине текста для усечения
-    func calculateVisibleParts(parts: [MessagePart], font: Any, maxWidth: CGFloat) -> ([MessagePart], Bool) {
-        // Платформенное приведение типа шрифта
-        let fnt = font as! NSFont
-        var width: CGFloat = 0
-        var visibleParts: [MessagePart] = []
-        for part in parts {
-            let partWidth: CGFloat
-            switch part {
-            case .text(let str):
-                partWidth = str.size(withAttributes: [.font: fnt]).width + fnt.pointSize * 0.3
-            case .emote:
-                partWidth = 32
-            }
-            if width + partWidth > maxWidth {
-                switch part {
-                case .text(let str):
-                    let remainingWidth = maxWidth - width
-                    if remainingWidth <= 0 {
-                        return (visibleParts, true)
-                    }
-                    var low = 0
-                    var high = str.count
-                    var fittingLength = 0
-                    while low <= high {
-                        let mid = (low + high) / 2
-                        let prefix = String(str.prefix(mid))
-                        let prefixWidth = prefix.size(withAttributes: [.font: fnt]).width + fnt.pointSize * 0.3
-                        if prefixWidth <= remainingWidth {
-                            fittingLength = mid
-                            low = mid + 1
-                        } else {
-                            high = mid - 1
-                        }
-                    }
-                    if fittingLength > 0 {
-                        let fittingPrefix = String(str.prefix(fittingLength))
-                        visibleParts.append(.text(fittingPrefix))
-                    }
-                    return (visibleParts, true)
-                case .emote:
-                    return (visibleParts, true)
-                }
-            }
-            visibleParts.append(part)
-            width += partWidth
-        }
-        return (visibleParts, false)
-    }
-}
-
 // MARK: - SwiftUI-вью для отображения сообщения: бейджи, ник, текст/эмоута
-struct MessageTextView: View {
-    let badges: [BadgeViewData]
-    let sender: String
-    let senderColor: Color
-    let parts: [MessagePart]
-    let maxWidth: CGFloat
-    let badgeViews: ([(String, String)]) -> [BadgeViewData]
-    let isTruncated: Bool
-    
-    // Внутренняя структура с уже рассчитанными данными для рисования
-    private struct ProcessedMessage {
-        let visibleParts: [MessagePart]
-        let isTruncated: Bool
-        let badges: [BadgeViewData]
-        let sender: String
-        let senderColor: Color
-    }
-    // Ленивая подготовка данных: проверка входных параметров
-    private var processedMessage: ProcessedMessage? {
-        guard !parts.isEmpty, !badges.isEmpty, !sender.isEmpty else { return nil }
-        guard maxWidth > 0 else { return nil }
-        return ProcessedMessage(
-            visibleParts: parts,
-            isTruncated: isTruncated,
-            badges: badges,
-            sender: sender,
-            senderColor: senderColor
-        )
-    }
-    // Ключ анимации: зависит от отправителя и видимых частей
-    private var animationKey: String {
-        guard let processed = processedMessage else { return "none" }
-        return processed.sender + String(processed.visibleParts.hashValue)
-    }
-    // Состояния анимации и буфера сообщений
-    @State private var isExpanded: Bool = false
-    @Namespace private var namespace
-    @State private var lastSender: String? = nil
-    @State private var messageBuffer: [(sender: String, processed: ProcessedMessage)] = []
-    @State private var activeMessage: (sender: String, processed: ProcessedMessage)? = nil
-    @State private var isAnimating: Bool = false
-    @State private var badgeWidth: CGFloat = 0
 
-    // Локальная версия расчёта видимых частей для данной платформы
-    private func calculateVisibleParts(parts: [MessagePart], font: NSFont, maxWidth: CGFloat) -> ([MessagePart], Bool) {
-        var width: CGFloat = 0
-        var visibleParts: [MessagePart] = []
-        for part in parts {
-            let partWidth: CGFloat
-            switch part {
-            case .text(let str):
-                partWidth = str.size(withAttributes: [.font: font]).width + font.pointSize * 0.3
-            case .emote:
-                partWidth = 32
-            }
-            if width + partWidth > maxWidth {
-                switch part {
-                case .text(let str):
-                    let remainingWidth = maxWidth - width
-                    if remainingWidth <= 0 {
-                        return (visibleParts, true)
-                    }
-                    var low = 0
-                    var high = str.count
-                    var fittingLength = 0
-                    while low <= high {
-                        let mid = (low + high) / 2
-                        let prefix = String(str.prefix(mid))
-                        let prefixWidth = prefix.size(withAttributes: [.font: font]).width + font.pointSize * 0.3
-                        if prefixWidth <= remainingWidth {
-                            fittingLength = mid
-                            low = mid + 1
-                        } else {
-                            high = mid - 1
-                        }
-                    }
-                    if fittingLength > 0 {
-                        let fittingPrefix = String(str.prefix(fittingLength))
-                        visibleParts.append(.text(fittingPrefix))
-                    }
-                    return (visibleParts, true)
-                case .emote:
-                    return (visibleParts, true)
-                }
-            }
-            visibleParts.append(part)
-            width += partWidth
-        }
-        return (visibleParts, false)
-    }
 
-    // Пошаговая анимация смены отправителя и обработка очереди сообщений
-    private func processNextMessageFromBuffer() {
-        guard !messageBuffer.isEmpty else { isAnimating = false; return }
-        let next = messageBuffer.removeFirst()
-        if lastSender == nil || lastSender != next.sender {
-            isAnimating = true
-            withAnimation { isExpanded = false }
-            let transitionDuration = 0.3
-            DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration) {
-                lastSender = next.sender
-                activeMessage = next
-                withAnimation { isExpanded = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration) {
-                    isAnimating = false
-                    processNextMessageFromBuffer()
-                }
-            }
-        } else {
-            activeMessage = next
-            isAnimating = false
-            processNextMessageFromBuffer()
-        }
-    }
-    // Подвью: бейджи + ник в стекле
-    struct BadgeAndNickView: View {
-        let badgeViewsArray: [BadgeViewData]
-        let senderText: Text
-        var body: some View {
-            // Рендерим все бейджи и ник с эффектом стекла
-            HStack(spacing: 6) {
-                ForEach(badgeViewsArray) { badge in
-                    if let url = badge.url {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .empty:
-                                ProgressView().frame(width: 32, height: 32)
-                            case .success(let image):
-                                image.resizable().aspectRatio(contentMode: .fit).frame(width: 32, height: 32)
-                            case .failure:
-                                Text("❓").frame(width: 32, height: 32)
-                            @unknown default:
-                                EmptyView()
-                            }
-                        }
-                    } else {
-                        Text("❓").frame(width: 32, height: 32)
-                    }
-                }
-                senderText
-            }
-            .opacity(0.9)
-            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 0)
-            .padding()
-            .glassEffect(.regular)
-        }
-    }
-    // Подвью: строка частей сообщения (текст/эмуоты) с усечением
-    struct MessagePartsRowView: View {
-        let visiblePartsArray: [MessagePart]
-        let isTruncated: Bool
-        var body: some View {
-            // Рендерим последовательность частей и добавляем многоточие при усечении
-            HStack(spacing: 2) {
-                ForEach(visiblePartsArray.indices, id: \.self) { index in
-                    let part = visiblePartsArray[index]
-                    switch part {
-                    case .text(let string):
-                        let isLast = index == visiblePartsArray.count - 1
-                        let addSpace = !(isLast && isTruncated)
-                        Text(string + (addSpace ? " " : ""))
-                            .foregroundColor(.white)
-                    case .emote(_, let urlStr, let animated):
-                        if let url = URL(string: urlStr) {
-                            EmoteImageView(url: url, size: 32, animated: animated)
-                        }
-                    }
-                }
-                if isTruncated {
-                    Text("…")
-                        .foregroundColor(.white)
-                        .font(.system(size: 32))
-                        .fontWeight(.bold)
-                }
-            }
-            .opacity(0.9)
-            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 0)
-            .padding()
-            .glassEffect(.regular)
-            .glassEffectTransition(.materialize)
-        }
-    }
-    var body: some View {
-        // Платформенный выбор шрифта для визуализации
-        let font = NSFont.systemFont(ofSize: 32, weight: .bold)
-        // Основной контент: стек из блока бейджей/ника и строки сообщения
-        if let showMsg = activeMessage?.processed ?? processedMessage {
-            GlassEffectContainer(spacing: 10.0) {
-                // Контент с анимацией разворота бейджей при смене отправителя
-                HStack(spacing: 8) {
-                    if isExpanded {
-                        BadgeAndNickView(
-                            badgeViewsArray: showMsg.badges,
-                            senderText: Text(showMsg.sender).foregroundColor(showMsg.senderColor).font(.system(size: 32))
-                        )
-                    }
-                    MessagePartsRowView(visiblePartsArray: showMsg.visibleParts, isTruncated: showMsg.isTruncated)
-                        .id(animationKey)
-                        .font(.system(size: 32))
-                }
-                .animation(.spring(response: 0.5, dampingFraction: 0.7), value: animationKey)
-            }
-            // Реакция на смену отправителя: буферизация и последовательная анимация
-            .onChange(of: processedMessage?.sender) { newSender in
-                guard let processed = processedMessage else { return }
-                if isAnimating {
-                    messageBuffer.append((sender: processed.sender, processed: processed))
-                    return
-                }
-                if lastSender == nil {
-                    messageBuffer.append((sender: processed.sender, processed: processed))
-                    isAnimating = true
-                    processNextMessageFromBuffer()
-                    return
-                }
-                if lastSender != processed.sender {
-                    messageBuffer.append((sender: processed.sender, processed: processed))
-                    if !isAnimating {
-                        isAnimating = true
-                        processNextMessageFromBuffer()
-                    }
-                } else {
-                    activeMessage = (sender: processed.sender, processed: processed)
-                }
-            }
-            // Начальная инициализация локальных состояний
-            .onAppear {
-                isExpanded = true
-                lastSender = processedMessage?.sender
-                messageBuffer = []
-                activeMessage = nil
-                isAnimating = false
-            }
-        } else {
-            // Пока нет данных для отображения
-            ProgressView()
-                .frame(maxWidth: 16, maxHeight: 16)
-                .padding()
-                .glassEffect(.regular)
-        }
-    }
-}
+
+
+
+
 

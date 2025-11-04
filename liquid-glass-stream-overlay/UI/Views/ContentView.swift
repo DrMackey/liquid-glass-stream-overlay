@@ -85,6 +85,8 @@ struct ContentView: View {
                                 .font(.title)
                                 .padding(.top, 12)
                             }
+//                            GlassBarLabel(chat: chat)
+//                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             Spacer()
                         }
                     }
