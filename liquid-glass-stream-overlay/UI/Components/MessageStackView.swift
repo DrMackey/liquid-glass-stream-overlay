@@ -74,7 +74,6 @@ struct MessageStackView: View {
                         ),
                         maxWidth: maxWidth,
                         totalCount: messageItems.count,
-                        cascadeStyle: nil as CollapsibleMessageView.CascadeStyle?
                     )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -89,7 +88,6 @@ struct MessageStackView: View {
                     ),
                     maxWidth: maxWidth,
                     totalCount: messageItems.count,
-                    cascadeStyle: CollapsibleMessageView.CascadeStyle.cascade2
                 )
                 .transition(.scale.combined(with: .opacity))
                 .frame(maxWidth: .infinity, maxHeight: availableHeight, alignment: .bottom)

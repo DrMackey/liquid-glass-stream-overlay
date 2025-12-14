@@ -10,10 +10,7 @@ import AVFoundation
 import Combine
 import Foundation
 import Network
-
-#if os(macOS)
 import AppKit
-#endif
 
 import SDWebImageSwiftUI // Поддержка анимированных gif и webp (используется в EmoteImageView)
 
@@ -23,11 +20,17 @@ import SDWebImageSwiftUI // Поддержка анимированных gif и
 // 2) Верхний UI (чат поверх камеры)
 // 3) Glass Bar (панель с полупрозрачным материалом, маской и overlay)
 
+
+
 struct ContentView: View {
     // MARK: - State & ViewModels
     @StateObject private var capture = CameraCaptureManager()
     @StateObject private var chat = TwitchChatManager()
     @State private var showGlassEffectBar: Bool = false
+
+    // MARK: - Local HTTP Server (NWListener)
+    @State private var serverListener: NWListener?
+    @State private var serverPort: NWEndpoint.Port = 8080
 
     // Прогресс анимации выреза маски: 0 — дырка размером со весь контейнер,
     // 1 — целевые размеры выреза
@@ -40,6 +43,86 @@ struct ContentView: View {
             return BadgeViewData(set: set, version: version, url: url)
         }
         return badgeDataArray
+    }
+    
+    private func startLocalHTTPServer() {
+        do {
+            let parameters = NWParameters.tcp
+            let listener = try NWListener(using: parameters, on: serverPort)
+            serverListener = listener
+
+            listener.newConnectionHandler = { connection in
+                connection.start(queue: .global())
+                receiveHTTPRequest(on: connection)
+            }
+
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    print("Local HTTP server ready on port \(self.serverPort)")
+                case .failed(let error):
+                    print("Server failed: \(error)")
+                default:
+                    break
+                }
+            }
+
+            listener.start(queue: .global())
+        } catch {
+            print("Failed to start HTTP server: \(error)")
+        }
+    }
+    
+    private func receiveHTTPRequest(on connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { data, _, isComplete, error in
+            if let error = error {
+                print("Receive error: \(error)")
+                connection.cancel()
+                return
+            }
+            guard let data = data, !data.isEmpty else {
+                connection.cancel()
+                return
+            }
+            // Parse the first request line: e.g., "GET /changeScene/true HTTP/1.1"
+            let request = String(decoding: data, as: UTF8.self)
+            let firstLine = request.split(separator: "\r\n", maxSplits: 1, omittingEmptySubsequences: true).first ?? ""
+            let parts = firstLine.split(separator: " ")
+            var responseBody = ""
+            var status = "200 OK"
+
+            if parts.count >= 2, parts[0] == "GET" {
+                let path = String(parts[1])
+                if path == "/changeScene/true" {
+                    DispatchQueue.main.async {
+                        withAnimation(.timingCurve(0.42, 0, 0.58, 1, duration: 0.4)) {
+                            self.showGlassEffectBar = true
+                            self.cutoutAnimProgress = 1
+                        }
+                    }
+                    responseBody = "Scene changed: true\n"
+                } else if path == "/changeScene/false" {
+                    withAnimation(.timingCurve(0.42, 0, 0.58, 1, duration: 0.4)) {
+                        cutoutAnimProgress = 0
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        showGlassEffectBar = false
+                    }
+                    responseBody = "Scene changed: false\n"
+                } else {
+                    status = "404 Not Found"
+                    responseBody = "Not Found\n"
+                }
+            } else {
+                status = "400 Bad Request"
+                responseBody = "Bad Request\n"
+            }
+
+            let response = "HTTP/1.1 \(status)\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: \(responseBody.utf8.count)\r\nConnection: close\r\n\r\n\(responseBody)"
+            connection.send(content: response.data(using: .utf8), completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+        }
     }
 
     // MARK: - Body
@@ -67,28 +150,38 @@ struct ContentView: View {
             GeometryReader { geometry in
                 VStack(spacing: 0) {
                     ZStack(alignment: .top) {
-                        VStack {
-                            if let message = chat.lastMessage {
-                                let maxMessageWidth = geometry.size.width * 0.6
-                                let displayMessage = chat.makeDisplayMessage(message, maxWidth: maxMessageWidth, badgeUrlMap: chat.allBadgeImages)
-                                
-                                MessageTextView(
-                                    badges: displayMessage.badges,
-                                    sender: displayMessage.sender,
-                                    senderColor: displayMessage.senderColor,
-                                    parts: displayMessage.visibleParts,
-                                    maxWidth: maxMessageWidth,
-                                    badgeViews: { _ in displayMessage.badges },
-                                    isTruncated: displayMessage.isTruncated
-                                )
-                                .bold()
-                                .font(.title)
-                                .padding(.top, 12)
+                        HStack {
+                            Spacer().frame(maxWidth: 480, maxHeight: .infinity)
+                            VStack {
+                                if let message = chat.lastMessage {
+                                    let maxMessageWidth = 480
+                                    let displayMessage = chat.makeDisplayMessage(message, maxWidth: CGFloat(maxMessageWidth), badgeUrlMap: chat.allBadgeImages)
+                                    
+                                    MessageTextView(
+                                        badges: displayMessage.badges,
+                                        sender: displayMessage.sender,
+                                        senderColor: displayMessage.senderColor,
+                                        parts: displayMessage.visibleParts,
+                                        maxWidth: CGFloat(maxMessageWidth),
+                                        badgeViews: { _ in displayMessage.badges },
+                                        isTruncated: displayMessage.isTruncated
+                                    )
+                                    .bold()
+                                    .font(.title)
+                                    .padding(.top, 12)
+                                }
+                                Spacer()
                             }
-//                            GlassBarLabel(chat: chat)
-//                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            Spacer()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                            GlassBarLabel(
+                                chat: chat,
+                                isNotifictaion: true, insertionTransition: .move(edge: .trailing),
+                                removalTransition: .move(edge: .trailing).combined(with: .offset(x: 15))
+                            )
+                                .frame(maxWidth: 480, maxHeight: .infinity, alignment: .topLeading)
+                                .padding()
                         }
+                        
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
@@ -196,7 +289,10 @@ struct ContentView: View {
         .onAppear {
             capture.updateAvailableDevices()
             capture.startSession()
-            chat.start()
+//            chat.start()
+            if serverListener == nil {
+                startLocalHTTPServer()
+            }
             Task {
                 await chat.loadAllBadges(channelLogin: TWITCH_CHANNEL)
                 await chat.loadGlobalEmotes()

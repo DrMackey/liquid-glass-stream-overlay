@@ -2,279 +2,243 @@
 // Отрисовка одного сообщения с поддержкой каскадного состояния
 
 import SwiftUI
-#if os(macOS)
-import AppKit
-#else
-import UIKit
-#endif
 
+// Контейнер для компоновки одного сообщения.
 struct MessageLayout {
-    let message: DisplayMessage
-    let index: Int
-    let isCollapsed: Bool
-    let stackPosition: Int
+    let message: DisplayMessage           // Данные сообщения
+    let index: Int                       // Позиция сообщения в списке
+    let isCollapsed: Bool               // Статус свернутости сообщения
+    let stackPosition: Int              // Позиция для каскадного отображения
 }
 
+/*
+ Представляет экранный элемент пузыря сообщения с поддержкой каскадного и свернутого отображения.
+ Обрабатывает размеры, стили и визуальные эффекты в зависимости от состояния и стиля каскада.
+*/
 struct CollapsibleMessageView: View {
-    let layout: MessageLayout
-    let maxWidth: CGFloat
-    let totalCount: Int
-    var cascadeStyle: CascadeStyle? = nil
+    let layout: MessageLayout           // Компоновка и данные сообщения для отображения
+    let maxWidth: CGFloat               // Максимальная ширина области текста
+    let totalCount: Int                // Общее количество сообщений в списке
+    var contentPaddingH: CGFloat = 12  // Горизонтальные отступы внутри пузыря
+    var contentPaddingV: CGFloat = 10  // Вертикальные отступы внутри пузыря
+    var bubbleCornerRadius: CGFloat = 16  // Радиус скругления углов пузыря
     
-    var contentPaddingH: CGFloat = 12
-    var contentPaddingV: CGFloat = 10
-    var bubbleCornerRadius: CGFloat = 16
-    
-    enum CascadeStyle {
-        case cascade1
-        case cascade2
+    init(
+        layout: MessageLayout,
+        maxWidth: CGFloat,
+        totalCount: Int,
+        contentPaddingH: CGFloat = 12,
+        contentPaddingV: CGFloat = 10,
+        bubbleCornerRadius: CGFloat = 16
+    ) {
+        self.layout = layout
+        self.maxWidth = maxWidth
+        self.totalCount = totalCount
+        self.contentPaddingH = contentPaddingH
+        self.contentPaddingV = contentPaddingV
+        self.bubbleCornerRadius = bubbleCornerRadius
     }
     
+    /*
+     Вычисляемый масштаб для сообщения.
+     При свернутом состоянии масштаб зависит от позиции сообщения в стеке.
+     В обычном состоянии — стандартный масштаб 1.0.
+     Непосредственно влияет на размер текста и элементов.
+    */
     private var scaleEffect: CGFloat {
-        switch cascadeStyle {
-        case .cascade1: return 0.92
-        case .cascade2: return 0.84
-        default:
-            if layout.isCollapsed {
-                let collapsedIndex = totalCount - layout.index - 1
-                switch collapsedIndex {
-                case 0: return 0.92
-                case 1: return 0.84
-                default: return 0.76
-                }
-            } else { return 1.0 }
-        }
+        if layout.isCollapsed {
+            let collapsedIndex = totalCount - layout.index - 1
+            switch collapsedIndex {
+            case 0: return 0.92
+            case 1: return 0.84
+            default: return 0.76
+            }
+        } else { return 1.0 }
     }
     
+    /*
+     Смещение по вертикали для сообщения.
+     Без стилей каскада смещение отсутствует.
+    */
     private var yOffset: CGFloat {
-        switch cascadeStyle {
-        case .cascade1: return 20
-        case .cascade2: return 40
-        default:
-            return 0
-        }
+        0
     }
     
+    /*
+     Прозрачность сообщения.
+     При свернутом состоянии зависит от позиции сообщения.
+     В обычном состоянии — полностью непрозрачно.
+    */
     private var opacity: Double {
-        switch cascadeStyle {
-        case .cascade1: return 0.92
-        case .cascade2: return 0.6
-        default:
-            if layout.isCollapsed {
-                let collapsedIndex = totalCount - layout.index - 1
-                switch collapsedIndex {
-                case 0: return 0.9
-                case 1: return 0.8
-                default: return 0.7
-                }
-            } else { return 1.0 }
-        }
+        if layout.isCollapsed {
+            let collapsedIndex = totalCount - layout.index - 1
+            switch collapsedIndex {
+            case 0: return 0.9
+            case 1: return 0.8
+            default: return 0.7
+            }
+        } else { return 1.0 }
     }
     
+    /*
+     Индекс слоя для правильного наложения при каскадном отображении.
+     Чем меньше index, тем выше слой.
+    */
     private var zIndex: Double { Double(totalCount - layout.index) }
     
+    /*
+     Вычисляет размер шрифта, масштабируя системный базовый размер с учетом масштаба.
+     Влияет на читаемость и размер вложенных элементов.
+    */
     private var fontSize: CGFloat {
-        #if os(macOS)
-        let baseSize = NSFont.systemFontSize
-        #else
-        let baseSize = UIFont.systemFontSize
-        #endif
+        let baseSize: CGFloat = 13.0
         return baseSize * 2 * scaleEffect
     }
     
+    /*
+     Размер для эмодзи, равен размеру шрифта для гармоничного отображения.
+    */
     private var emoteSize: CGFloat { fontSize }
+    
+    /*
+     Размер для бейджей, равен размеру шрифта для консистентности.
+    */
     private var badgeSize: CGFloat { fontSize }
+    
+    private struct FlowItem: Identifiable, Hashable {
+        enum Kind: Hashable {
+            case badges([BadgeViewData], scale: CGFloat)
+            case sender(String, Color, size: CGFloat)
+            case word(String, size: CGFloat) // одно слово или слово с пробелом в конце
+            case emote(URL, size: CGFloat, animated: Bool)
+        }
+        enum StableID: Hashable {
+            case badges(hash: Int, scale: Int)
+            case sender(name: String, colorRGBA: UInt32, sizeKey: Int)
+            case word(index: Int, text: String)
+            case emote(url: String, animated: Bool)
+        }
+        let id: StableID
+        let kind: Kind
+    }
 
-    @ViewBuilder
+    private func buildFlowItems() -> [FlowItem] {
+        enum LinearElement {
+            case badges([BadgeViewData], scale: CGFloat)
+            case sender(String, Color, size: CGFloat)
+            case text(String, size: CGFloat)
+            case emote(URL, size: CGFloat, animated: Bool)
+        }
+
+        var linear: [LinearElement] = []
+        // badges
+        linear.append(.badges(layout.message.badges, scale: fontSize / 16))
+        // sender
+        linear.append(.sender(layout.message.sender, layout.message.senderColor, size: fontSize))
+        // parts in order
+        for part in layout.message.visibleParts {
+            switch part {
+            case .text(let string):
+                linear.append(.text(string, size: fontSize))
+            case .emote(_, let urlStr, let animated):
+                if let url = URL(string: urlStr) {
+                    linear.append(.emote(url, size: emoteSize, animated: animated))
+                }
+            }
+        }
+
+        // Expand text into word tokens, adding trailing space only when next token is also a word
+        var result: [FlowItem] = []
+        var wordIndex = 0
+
+        func appendWordTokens(from text: String, size: CGFloat, nextIsText: Bool) {
+            // Split by whitespaces and newlines; ignore empty tokens
+            // Preserve punctuation as part of the token
+            let rawTokens = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+            guard !rawTokens.isEmpty else { return }
+            for i in 0..<rawTokens.count {
+                let isLastInThisText = (i == rawTokens.count - 1)
+                let shouldAppendSpace = !isLastInThisText || nextIsText
+                let token = rawTokens[i] + (shouldAppendSpace ? " " : "")
+                let sid: FlowItem.StableID = .word(index: wordIndex, text: token)
+                result.append(.init(id: sid, kind: .word(token, size: size)))
+                wordIndex += 1
+            }
+        }
+
+        for (idx, element) in linear.enumerated() {
+            let next = (idx + 1 < linear.count) ? linear[idx + 1] : nil
+            switch element {
+            case .badges(let badges, let scale):
+                let badgesHash = badges.reduce(into: 0) { partial, b in
+                    // Combine a few stable fields; adjust if BadgeViewData changes
+                    partial = partial &* 31 &+ b.id.hashValue
+                }
+                let scaleKey = Int((scale * 1000).rounded())
+                let sid: FlowItem.StableID = .badges(hash: badgesHash, scale: scaleKey)
+                result.append(.init(id: sid, kind: .badges(badges, scale: scale)))
+            case .sender(let name, let color, let size):
+                let rgba = color.toRGBA32()
+                let sizeKey = Int((size * 1000).rounded())
+                let sid: FlowItem.StableID = .sender(name: name, colorRGBA: rgba, sizeKey: sizeKey)
+                result.append(.init(id: sid, kind: .sender(name, color, size: size)))
+            case .text(let string, let size):
+                let nextIsText: Bool
+                if case .text = next { nextIsText = true } else { nextIsText = false }
+                appendWordTokens(from: string, size: size, nextIsText: nextIsText)
+            case .emote(let url, let size, let animated):
+                let sid: FlowItem.StableID = .emote(url: url.absoluteString, animated: animated)
+                result.append(.init(id: sid, kind: .emote(url, size: size, animated: animated)))
+            }
+        }
+
+        return result
+    }
+    
     private var messageContent: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            messageFirstLine
-            additionalMessageLines
-        }
-    }
-    
-    @ViewBuilder
-    private var messageFirstLine: some View {
-        HStack(alignment: .top, spacing: 6) {
-            BadgeIconsView(badges: layout.message.badges, scale: fontSize / 16)
-            senderName
-            firstLineParts
-            Spacer()
-        }
-    }
-    
-    @ViewBuilder
-    private var senderName: some View {
-        Text(layout.message.sender)
-            .bold()
-            .foregroundColor(layout.message.senderColor)
-            .font(.system(size: fontSize))
-    }
-    
-    @ViewBuilder
-    private var firstLineParts: some View {
-        if let firstLine = wrappedLines.first {
-            ForEach(firstLine.indices, id: \.self) { i in
-                let part = firstLine[i]
-                switch part {
-                case .text(let string):
-                    Text(string + " ")
-                        .foregroundColor(.primary)
-                        .font(.system(size: fontSize))
-                case .emote(_, let urlStr, let animated):
-                    if let url = URL(string: urlStr) {
-                        EmoteImageView(url: url, size: emoteSize, animated: animated)
-                    }
-                }
+        FlowRows(items: buildFlowItems(), hSpacing: 6, vSpacing: 2, rowAlignment: .firstTextBaseline, spacingProvider: { current, next in
+            // Если текущий и следующий элементы — слова, не добавляем межэлементный отступ, пробел уже входит в токен
+            let currentIsWord: Bool
+            let nextIsWord: Bool
+            switch (current as! FlowItem).kind { case .word: currentIsWord = true; default: currentIsWord = false }
+            if let next = next {
+                switch (next as! FlowItem).kind { case .word: nextIsWord = true; default: nextIsWord = false }
+            } else { nextIsWord = false }
+            return (currentIsWord && nextIsWord) ? 0 : 6
+        }) { item in
+            switch item.kind {
+            case .badges(let badges, let scale):
+                BadgeIconsView(badges: badges, scale: scale)
+            case .sender(let name, let color, let size):
+                Text(name)
+                    .bold()
+                    .foregroundColor(color)
+                    .font(.system(size: size))
+                    .lineLimit(1)
+//                    .background(Color.red)
+            case .word(let token, let size):
+                Text(token)
+                    .foregroundColor(.primary)
+                    .font(.system(size: size))
+                    .lineLimit(1) // каждый токен — одна строка, перенос делаем на уровне лэйаута
+//                    .background(Color.green)
+            case .emote(let url, let size, let animated):
+                EmoteImageView(url: url, size: size, animated: animated)
+//                    .background(Color.red)
             }
         }
     }
     
-    @ViewBuilder
-    private var additionalMessageLines: some View {
-        ForEach(Array(wrappedLines.indices.dropFirst().enumerated()), id: \.offset) { lineIndex, originalIndex in
-            HStack(spacing: 2) {
-                let line = wrappedLines[originalIndex]
-                ForEach(line.indices, id: \.self) { i in
-                    let part = line[i]
-                    switch part {
-                    case .text(let string):
-                        Text(string + " ")
-                            .foregroundColor(.primary)
-                            .font(.system(size: fontSize))
-                    case .emote(_, let urlStr, let animated):
-                        if let url = URL(string: urlStr) {
-                            EmoteImageView(url: url, size: emoteSize, animated: animated)
-                        }
-                    }
-                }
-                if originalIndex == wrappedLines.indices.last && layout.message.isTruncated {
-                    Text("…")
-                        .font(.system(size: fontSize))
-                }
-            }
-        }
-    }
-    
-    private var wrappedLines: [[MessagePart]] {
-        #if os(macOS)
-        let font = NSFont.systemFont(ofSize: fontSize)
-        #else
-        let font = UIFont.systemFont(ofSize: fontSize)
-        #endif
-        
-        #if os(macOS)
-        let nicknameWidth = layout.message.sender.size(withAttributes: [.font: font]).width + font.pointSize * 0.3
-        #else
-        let nicknameWidth = (layout.message.sender as NSString).size(withAttributes: [.font: font]).width + font.pointSize * 0.3
-        #endif
-        
-        let badgesTotalWidth = CGFloat(layout.message.badges.count) * badgeSize + CGFloat(max(layout.message.badges.count-1, 0)) * 2
-        
-        return wrapMessageParts(
-            layout.message.visibleParts,
-            font: font,
-            maxWidth: maxWidth * 0.7,
-            firstLinePrefixWidth: nicknameWidth + badgesTotalWidth + 8
-        )
-    }
-    
-#if os(macOS)
-    private func wrapMessageParts(_ parts: [MessagePart], font: NSFont, maxWidth: CGFloat, firstLinePrefixWidth: CGFloat = 0) -> [[MessagePart]] {
-        var lines: [[MessagePart]] = []
-        var currentLine: [MessagePart] = []
-        var isFirstLine = true
-        var currentLineWidth: CGFloat = isFirstLine ? firstLinePrefixWidth : 0
-        
-        for part in parts {
-            switch part {
-            case .text(let str):
-                let words = str.split(separator: " ", omittingEmptySubsequences: false)
-                for (i, wordSub) in words.enumerated() {
-                    let word = String(wordSub) + (i < words.count-1 ? " " : "")
-                    let partWidth = word.size(withAttributes: [.font: font]).width + font.pointSize * 0.3
-                    let effectiveWidth = isFirstLine ? maxWidth - currentLineWidth : maxWidth
-                    
-                    if currentLineWidth + partWidth > effectiveWidth && !currentLine.isEmpty {
-                        lines.append(currentLine)
-                        currentLine = [.text(word)]
-                        currentLineWidth = partWidth
-                        isFirstLine = false
-                    } else {
-                        currentLine.append(.text(word))
-                        currentLineWidth += partWidth
-                    }
-                }
-            case .emote:
-                let partWidth: CGFloat = emoteSize
-                let effectiveWidth = isFirstLine ? maxWidth - currentLineWidth : maxWidth
-                
-                if currentLineWidth + partWidth > effectiveWidth && !currentLine.isEmpty {
-                    lines.append(currentLine)
-                    currentLine = [part]
-                    currentLineWidth = partWidth
-                    isFirstLine = false
-                } else {
-                    currentLine.append(part)
-                    currentLineWidth += partWidth
-                }
-            }
-        }
-        
-        if !currentLine.isEmpty { lines.append(currentLine) }
-        return lines
-    }
-#else
-    private func wrapMessageParts(_ parts: [MessagePart], font: UIFont, maxWidth: CGFloat, firstLinePrefixWidth: CGFloat = 0) -> [[MessagePart]] {
-        var lines: [[MessagePart]] = []
-        var currentLine: [MessagePart] = []
-        var isFirstLine = true
-        var currentLineWidth: CGFloat = isFirstLine ? firstLinePrefixWidth : 0
-        
-        for part in parts {
-            switch part {
-            case .text(let str):
-                let words = str.split(separator: " ", omittingEmptySubsequences: false)
-                for (i, wordSub) in words.enumerated() {
-                    let word = String(wordSub) + (i < words.count-1 ? " " : "")
-                    let partWidth = word.size(withAttributes: [.font: font]).width + font.pointSize * 0.3
-                    let effectiveWidth = isFirstLine ? maxWidth - currentLineWidth : maxWidth
-                    
-                    if currentLineWidth + partWidth > effectiveWidth && !currentLine.isEmpty {
-                        lines.append(currentLine)
-                        currentLine = [.text(word)]
-                        currentLineWidth = partWidth
-                        isFirstLine = false
-                    } else {
-                        currentLine.append(.text(word))
-                        currentLineWidth += partWidth
-                    }
-                }
-            case .emote:
-                let partWidth: CGFloat = emoteSize
-                let effectiveWidth = isFirstLine ? maxWidth - currentLineWidth : maxWidth
-                
-                if currentLineWidth + partWidth > effectiveWidth && !currentLine.isEmpty {
-                    lines.append(currentLine)
-                    currentLine = [part]
-                    currentLineWidth = partWidth
-                    isFirstLine = false
-                } else {
-                    currentLine.append(part)
-                    currentLineWidth += partWidth
-                }
-            }
-        }
-        
-        if !currentLine.isEmpty { lines.append(currentLine) }
-        return lines
-    }
-#endif
-
+    /*
+     Основной body View.
+     Составляет сообщение с настройками отступов, скругления, стековых эффектов, масштабирования, смещения,
+     прозрачности и индекса слоя.
+     Анимация зависит от изменений состояния свернутости.
+    */
     var body: some View {
         messageContent
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+//            .fixedSize(horizontal: false, vertical: true)
+//            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, contentPaddingH)
             .padding(.vertical, contentPaddingV)
             .glassEffect(.regular, in: .rect(cornerRadius: bubbleCornerRadius))
@@ -286,3 +250,136 @@ struct CollapsibleMessageView: View {
     }
 }
 
+// MARK: - FlowRows: simple wrapping layout for inline items
+private struct FlowRows<Item: Identifiable, Content: View>: View {
+    let items: [Item]
+    let hSpacing: CGFloat
+    let vSpacing: CGFloat
+    let rowAlignment: VerticalAlignment
+    let spacingProvider: ((Item, Item?) -> CGFloat)?
+
+    @State private var sizes: [AnyHashable: CGSize] = [:]
+
+    init(items: [Item], hSpacing: CGFloat = 8, vSpacing: CGFloat = 8, rowAlignment: VerticalAlignment = .firstTextBaseline, spacingProvider: ((Item, Item?) -> CGFloat)? = nil, @ViewBuilder content: @escaping (Item) -> Content) {
+        self.items = items
+        self.hSpacing = hSpacing
+        self.vSpacing = vSpacing
+        self.rowAlignment = rowAlignment
+        self.spacingProvider = spacingProvider
+        self.content = content
+    }
+
+    let content: (Item) -> Content
+    @State private var onMaxHeight: CGFloat = 30
+    
+
+    var body: some View {
+//        VStack() {
+            GeometryReader { proxy in
+                let availableWidth = proxy.size.width
+                let rows = buildRows(maxWidth: availableWidth)
+                
+//                onMaxHeight *= CGFloat(rows.count)
+                VStack(alignment: .leading, spacing: vSpacing) {
+                    
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                        HStack( spacing: 0) {
+                            ForEach(Array(row.enumerated()), id: \.element.id) { index, item in
+                                let nextItem: Item? = (index + 1 < row.count) ? row[index + 1] : nil
+
+                                content(item)
+                                    .padding(.trailing, spacingBetween(item, nextItem))
+                                    
+                            }
+                        }
+                    }
+                }
+//                .onAppear { onMaxHeight = 30 * CGFloat(rows.count)
+//                    print("Это переменная высоты: \(onMaxHeight): \(rows.count): \(rows)")}
+                .onChange(of: rows.count) { if (rows.count > 1) {onMaxHeight = 30 * CGFloat(rows.count)} }
+//                .frame(maxWidth: .infinity, alignment: .leading)
+                // Hidden measuring layer to collect sizes
+                .background(
+                    ZStack { // keep ZStack only for measuring; items are hidden
+                        ForEach(items) { item in
+                            content(item)
+                                .background(GeometryReader { geo in
+                                    Color.clear.preference(key: _FlowItemSizeKey2.self, value: [AnyHashable(item.id): geo.size])
+                                })
+                                .hidden()
+                        }
+                    }
+                )
+                .onPreferenceChange(_FlowItemSizeKey2.self) { value in
+                    sizes.merge(value) { $1 }
+                }
+            }
+            .frame(maxHeight: onMaxHeight)
+//            .background(Color.white)
+//        }.glassEffect(.regular, in: .rect(cornerRadius: 16))
+    }
+
+    
+    private func spacingBetween(_ current: Item, _ next: Item?) -> CGFloat {
+        spacingProvider?(current, next) ?? hSpacing
+    }
+
+    private func buildRows(maxWidth: CGFloat) -> [[Item]] {
+        var rows: [[Item]] = []
+        var currentRow: [Item] = []
+        var currentX: CGFloat = 0
+
+        for (index, item) in items.enumerated() {
+            guard let size = sizes[AnyHashable(item.id)] else {
+                // If size is not yet measured, optimistically place item in current row; layout will update after measuring
+                currentRow.append(item)
+                continue
+            }
+            let nextItem: Item? = (index + 1 < items.count) ? items[index + 1] : nil
+            let spacingAfter = spacingBetween(item, nextItem)
+
+            // Wrap if doesn't fit
+            if currentX > 0 && (currentX + size.width) > maxWidth {
+                rows.append(currentRow)
+                currentRow = []
+                currentX = 0
+            }
+
+            currentRow.append(item)
+            // advance cursor (spacing applies after the item)
+            currentX += size.width + spacingAfter
+        }
+
+        if !currentRow.isEmpty {
+            rows.append(currentRow)
+        }
+//        onMaxHeight *= CGFloat(rows.count)
+//        print("Это переменная высоты: \(onMaxHeight): \(rows.count): \(rows)")
+        return rows
+    }
+}
+
+private struct _FlowItemSizeKey2: PreferenceKey {
+    static var defaultValue: [AnyHashable: CGSize] = [:]
+    static func reduce(value: inout [AnyHashable: CGSize], nextValue: () -> [AnyHashable: CGSize]) { value.merge(nextValue()) { $1 } }
+}
+
+private extension Color {
+    func toRGBA32() -> UInt32 {
+        #if canImport(UIKit)
+        let ui = UIColor(self)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+        #elseif canImport(AppKit)
+        let ns = NSColor(self)
+        let conv = ns.usingColorSpace(.deviceRGB) ?? ns
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        conv.getRed(&r, green: &g, blue: &b, alpha: &a)
+        #endif
+        let R = UInt32((r * 255).rounded())
+        let G = UInt32((g * 255).rounded())
+        let B = UInt32((b * 255).rounded())
+        let A = UInt32((a * 255).rounded())
+        return (R << 24) | (G << 16) | (B << 8) | A
+    }
+}
