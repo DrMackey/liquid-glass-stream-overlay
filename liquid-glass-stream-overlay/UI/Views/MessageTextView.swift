@@ -40,9 +40,8 @@ struct MessageTextView: View {
     @State private var isExpanded: Bool = false
     @Namespace private var namespace
     @State private var lastSender: String? = nil
-    @State private var messageBuffer: [(sender: String, processed: ProcessedMessage)] = []
-    @State private var activeMessage: (sender: String, processed: ProcessedMessage)? = nil
-    @State private var isAnimating: Bool = false
+    // Убрали буфер и флаг анимации
+    @State private var activeMessage: ProcessedMessage? = nil
     @State private var badgeWidth: CGFloat = 0
 
     // Локальная версия расчёта видимых частей для данной платформы
@@ -93,27 +92,20 @@ struct MessageTextView: View {
         return (visibleParts, false)
     }
 
-    // Пошаговая анимация смены отправителя и обработка очереди сообщений
-    private func processNextMessageFromBuffer() {
-        guard !messageBuffer.isEmpty else { isAnimating = false; return }
-        let next = messageBuffer.removeFirst()
+    // Прямая обработка последнего сообщения без буфера
+    private func processNextMessage(_ next: ProcessedMessage) {
+        // Если отправитель меняется — делаем сворачивание/разворачивание бейджей
         if lastSender == nil || lastSender != next.sender {
-            isAnimating = true
             withAnimation { isExpanded = false }
             let transitionDuration = 0.3
             DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration) {
                 lastSender = next.sender
                 activeMessage = next
                 withAnimation { isExpanded = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration) {
-                    isAnimating = false
-                    processNextMessageFromBuffer()
-                }
             }
         } else {
+            // Тот же отправитель — просто обновляем контент
             activeMessage = next
-            isAnimating = false
-            processNextMessageFromBuffer()
         }
     }
     // Подвью: бейджи + ник в стекле
@@ -185,10 +177,8 @@ struct MessageTextView: View {
         }
     }
     var body: some View {
-        // Платформенный выбор шрифта для визуализации
-        let font = NSFont.systemFont(ofSize: 32, weight: .bold)
         // Основной контент: стек из блока бейджей/ника и строки сообщения
-        if let showMsg = activeMessage?.processed ?? processedMessage {
+        if let showMsg = activeMessage ?? processedMessage {
             GlassEffectContainer(spacing: 10.0) {
                 // Контент с анимацией разворота бейджей при смене отправителя
                 HStack(spacing: 8) {
@@ -204,36 +194,22 @@ struct MessageTextView: View {
                 }
                 .animation(.spring(response: 0.5, dampingFraction: 0.7), value: animationKey)
             }
-            // Реакция на смену отправителя: буферизация и последовательная анимация
-            .onChange(of: processedMessage?.sender) { newSender in
-                guard let processed = processedMessage else { return }
-                if isAnimating {
-                    messageBuffer.append((sender: processed.sender, processed: processed))
-                    return
-                }
-                if lastSender == nil {
-                    messageBuffer.append((sender: processed.sender, processed: processed))
-                    isAnimating = true
-                    processNextMessageFromBuffer()
-                    return
-                }
-                if lastSender != processed.sender {
-                    messageBuffer.append((sender: processed.sender, processed: processed))
-                    if !isAnimating {
-                        isAnimating = true
-                        processNextMessageFromBuffer()
-                    }
-                } else {
-                    activeMessage = (sender: processed.sender, processed: processed)
+            // Реакция на смену отправителя: берём последнее processedMessage напрямую
+//            .onChange(of: processedMessage?.sender) { _ in
+//                guard let processed = processedMessage else { return }
+//                processNextMessage(processed)
+//            }
+            // Вызов при любом обновлении ProcessedMessage (по ключу анимации)
+            .onChange(of: animationKey) { _ in
+                if let processed = processedMessage {
+                    processNextMessage(processed)
                 }
             }
             // Начальная инициализация локальных состояний
             .onAppear {
                 isExpanded = true
                 lastSender = processedMessage?.sender
-                messageBuffer = []
-                activeMessage = nil
-                isAnimating = false
+                activeMessage = processedMessage
             }
         } else {
             // Пока нет данных для отображения

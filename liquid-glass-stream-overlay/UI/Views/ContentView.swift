@@ -210,9 +210,10 @@ struct ContentView: View {
                     }
                     .padding()
                     .background(
-                        Rectangle()
-                            .fill(.clear)
-                            .glassEffect(.regular, in: .rect(cornerRadius: 0))
+//                        Rectangle()
+//                            .fill(.clear)
+//                            .glassEffect(.regular, in: .rect(cornerRadius: 0))
+                            .ultraThinMaterial
                     )
                     .compositingGroup()
                     // Маска с анимируемым вырезом

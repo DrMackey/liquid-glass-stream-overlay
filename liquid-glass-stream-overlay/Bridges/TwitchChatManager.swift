@@ -221,10 +221,10 @@ final class TwitchChatManager: ObservableObject {
     @Published var categoryImageURL: URL? = nil
 
     // Транспорт IRC, учётные данные и вспомогательные таймеры/очереди
-    private var connection: NWConnection?
-    private let queue = DispatchQueue(label: "TwitchChatQueue")
-    private let oauthToken = "oauth:2s4x0c089w8u5ouwdoi5veduxk9sbr"
-    private let nick = "DrMackey_"
+//    private var connection: NWConnection?
+//    private let queue = DispatchQueue(label: "TwitchChatQueue")
+//    private let oauthToken = "oauth:2s4x0c089w8u5ouwdoi5veduxk9sbr"
+//    private let nick = "DrMackey_"
     private(set) var channelId: String? = nil
     private var lastDisplayTime: Date = .distantPast
     private var pendingMessage: Message? = nil
@@ -296,33 +296,21 @@ final class TwitchChatManager: ObservableObject {
         }
     }
 
-    // Троттлинг вывода сообщений (не чаще 1/с), буферизация и таймер
+    // Больше не Троттлинг вывода сообщений (не чаще 1/с), буферизация и таймер
     private func setLastMessageThrottled(_ message: Message) {
-        let now = Date()
-        let interval = now.timeIntervalSince(lastDisplayTime)
-        if interval >= 1.0 {
-            lastDisplayTime = now
-            DispatchQueue.main.async { [weak self] in
-                self?.lastMessage = message
-                if let self = self {
-                    self.messages.append(message)
-                    if self.messages.count > 20 { self.messages.removeFirst(self.messages.count - 20) }
-                }
-            }
-        } else {
-            pendingMessage = message
-            displayTimer?.invalidate()
-            let delay = 1.0 - interval
-            displayTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-                guard let self = self, let pending = self.pendingMessage else { return }
-                self.lastDisplayTime = Date()
-                DispatchQueue.main.async {
-                    self.lastMessage = pending
-                    self.messages.append(pending)
-                    if self.messages.count > 20 { self.messages.removeFirst(self.messages.count - 20) }
-                }
-                self.pendingMessage = nil
-                self.displayTimer = nil
+        // Немедленно обновляем UI на главном потоке
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Обновляем последнее сообщение
+            self.lastMessage = message
+            
+            // Добавляем сообщение в историю
+            self.messages.append(message)
+            
+            // Ограничиваем размер истории (опционально, можно оставить для оптимизации)
+            if self.messages.count > 20 {
+                self.messages.removeFirst(self.messages.count - 20)
             }
         }
     }
@@ -1065,19 +1053,3 @@ struct DisplayMessage: Identifiable {
 }
 
 // MARK: - SwiftUI-вью для отображения сообщения: бейджи, ник, текст/эмоута
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
