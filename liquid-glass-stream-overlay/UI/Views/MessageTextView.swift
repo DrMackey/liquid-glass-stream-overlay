@@ -104,7 +104,6 @@ struct MessageTextView: View {
                 withAnimation { isExpanded = true }
             }
         } else {
-            // Тот же отправитель — просто обновляем контент
             activeMessage = next
         }
     }
