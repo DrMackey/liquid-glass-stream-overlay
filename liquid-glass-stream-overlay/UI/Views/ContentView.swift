@@ -164,7 +164,8 @@ struct ContentView: View {
                                         parts: displayMessage.visibleParts,
                                         maxWidth: CGFloat(maxMessageWidth),
                                         badgeViews: { _ in displayMessage.badges },
-                                        isTruncated: displayMessage.isTruncated
+                                        isTruncated: displayMessage.isTruncated,
+                                        message: message
                                     )
                                     .bold()
                                     .font(.title)
@@ -316,3 +317,4 @@ struct ContentView: View {
 #Preview {
     ContentView()
 }
+
