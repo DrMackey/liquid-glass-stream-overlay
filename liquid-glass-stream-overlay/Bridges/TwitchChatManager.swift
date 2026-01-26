@@ -338,13 +338,13 @@ final class TwitchChatManager: ObservableObject {
 //            if let http = resp as? HTTPURLResponse {
 //                print("[TwitchChat] badges/global status: \(http.statusCode)")
 //            }
-            struct BadgeVersion: Decodable { let id: String; let image_url_1x: String? }
+            struct BadgeVersion: Decodable { let id: String; let image_url_2x: String? }
             struct BadgeSet: Decodable { let set_id: String; let versions: [BadgeVersion] }
             struct HelixResponse: Decodable { let data: [BadgeSet] }
             let global = try JSONDecoder().decode(HelixResponse.self, from: dataGlobal)
             for set in global.data {
                 var ver: [String: String] = [:]
-                for v in set.versions { if let url = v.image_url_1x, !url.isEmpty { ver[v.id] = url } }
+                for v in set.versions { if let url = v.image_url_2x, !url.isEmpty { ver[v.id] = url } }
                 if !ver.isEmpty { mergedBadges[set.set_id] = ver }
             }
         } catch { print("Ошибка загрузки глобальных баджей: \(error)") }
@@ -367,13 +367,13 @@ final class TwitchChatManager: ObservableObject {
 //            if let http = resp2 as? HTTPURLResponse {
 //                print("[TwitchChat] chat/badges?broadcaster_id= status: \(http.statusCode)")
 //            }
-            struct BadgeVersion: Decodable { let id: String; let image_url_1x: String? }
+            struct BadgeVersion: Decodable { let id: String; let image_url_2x: String? }
             struct BadgeSet: Decodable { let set_id: String; let versions: [BadgeVersion] }
             struct HelixResponse: Decodable { let data: [BadgeSet] }
             let channel = try JSONDecoder().decode(HelixResponse.self, from: badgeData)
             for set in channel.data {
                 var ver: [String: String] = mergedBadges[set.set_id] ?? [:]
-                for v in set.versions { if let url = v.image_url_1x, !url.isEmpty { ver[v.id] = url } }
+                for v in set.versions { if let url = v.image_url_2x, !url.isEmpty { ver[v.id] = url } }
                 if !ver.isEmpty { mergedBadges[set.set_id] = ver }
             }
         } catch { print("Ошибка загрузки каналовых баджей: \(error)") }

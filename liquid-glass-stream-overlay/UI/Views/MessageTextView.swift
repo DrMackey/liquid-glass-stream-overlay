@@ -51,21 +51,43 @@ struct MessageTextView: View {
     struct BadgeAndNickView: View {
         let badgeViewsArray: [BadgeViewData]
         let senderText: Text
+        let namespace: Namespace.ID
+        
+        // Кешируем Data изображений вместо UIImage
+        @State private var imageDataCache: [URL: Data] = [:]
+        
         var body: some View {
-            // Рендерим все бейджи и ник с эффектом стекла
             HStack(spacing: 6) {
                 ForEach(badgeViewsArray) { badge in
                     if let url = badge.url {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .empty:
-                                ProgressView().frame(width: 32, height: 32)
-                            case .success(let image):
-                                image.resizable().aspectRatio(contentMode: .fit).frame(width: 32, height: 32)
-                            case .failure:
+                        if let imageData = imageDataCache[url] {
+                            if let nsImage = NSImage(data: imageData) {
+                                Image(nsImage: nsImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 32, height: 32)
+                            } else {
                                 Text("❓").frame(width: 32, height: 32)
-                            @unknown default:
-                                EmptyView()
+                            }
+                        } else {
+                            // Загружаем и кешируем
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .empty:
+                                    ProgressView().frame(width: 32, height: 32)
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: 32, height: 32)
+                                        .task {
+                                            await cacheImageData(from: url)
+                                        }
+                                case .failure:
+                                    Text("❓").frame(width: 32, height: 32)
+                                @unknown default:
+                                    EmptyView()
+                                }
                             }
                         }
                     } else {
@@ -78,6 +100,19 @@ struct MessageTextView: View {
             .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 0)
             .padding()
             .glassEffect(.regular)
+//            .glassEffectTransition(.matchedGeometry)
+//            .glassEffectID("nick", in: namespace)
+        }
+        
+        private func cacheImageData(from url: URL) async {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                await MainActor.run {
+                    imageDataCache[url] = data
+                }
+            } catch {
+                // Игнорируем ошибки кеширования
+            }
         }
     }
     
@@ -87,6 +122,7 @@ struct MessageTextView: View {
             let isTruncated: Bool
             var currentIndex: Int
             let animationKey: String
+            let namespace: Namespace.ID
             
             var body: some View {
                 HStack() {
@@ -119,7 +155,8 @@ struct MessageTextView: View {
                     .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 0)
                     .padding()
                     .glassEffect(.regular)
-                    .glassEffectTransition(.materialize)
+//                    .glassEffectTransition(.matchedGeometry)
+//                    .glassEffectID("message", in: namespace)
                 }
                 
                 
@@ -132,14 +169,14 @@ struct MessageTextView: View {
             GlassEffectContainer(spacing: 10.0) {
                 // Контент с анимацией разворота бейджей при смене отправителя
                 HStack(spacing: 8) {
-                    if isExpanded {
+                    if isExpanded, let active = activeMessage {
                         BadgeAndNickView(
-                            badgeViewsArray: showMsg.badges,
-                            senderText: Text(showMsg.sender).foregroundColor(showMsg.senderColor).font(.system(size: 32))
+                            badgeViewsArray: active.badges,
+                            senderText: Text(active.sender).foregroundColor(active.senderColor).font(.system(size: 32)),
+                            namespace: namespace
                         )
                     }
-                    MessagePartsRowView(visiblePartsArray: messages2, isTruncated: showMsg.isTruncated, currentIndex: currentIndex, animationKey: animationKey)
-                            .id(animationKey)
+                    MessagePartsRowView(visiblePartsArray: messages2, isTruncated: showMsg.isTruncated, currentIndex: currentIndex, animationKey: animationKey, namespace: namespace)
                             .font(.system(size: 32))
                 }
             }
@@ -150,37 +187,30 @@ struct MessageTextView: View {
                 }
                     
                 if lastSender == nil || lastSender != processedMessage?.sender {
-                    withAnimation {
+                    withAnimation(.smooth(duration: 0.6)) {
                         isExpanded = false
-                        isToggle = false
                     }
                     let transitionDuration = 0.3
                     DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration) {
                         lastSender = processedMessage?.sender
                         activeMessage = processedMessage
-                        withAnimation {
+                        withAnimation(.smooth(duration: 0.6)) {
                             isExpanded = true
-                            isToggle = true
-                        }
-                    }
-                } else {
-                    activeMessage = processedMessage
-                    withAnimation {
-                        isToggle = false
-                    }
-                    let transitionDuration = 0.3
-                    DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration) {
-                        withAnimation {
-                            isToggle = true
                         }
                     }
                 }
-            }            // Начальная инициализация локальных состояний
+            }
+            // Начальная инициализация локальных состояний
             .onAppear {
                 messages2 = showMsg.visibleParts
                 isExpanded = true
                 lastSender = processedMessage?.sender
                 activeMessage = processedMessage
+            }
+            Button("button") {
+                withAnimation {
+                    isExpanded.toggle()
+                }
             }
         } else {
             // Пока нет данных для отображения
