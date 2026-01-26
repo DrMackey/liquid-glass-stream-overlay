@@ -207,11 +207,6 @@ struct MessageTextView: View {
                 lastSender = processedMessage?.sender
                 activeMessage = processedMessage
             }
-            Button("button") {
-                withAnimation {
-                    isExpanded.toggle()
-                }
-            }
         } else {
             // Пока нет данных для отображения
             ProgressView()
