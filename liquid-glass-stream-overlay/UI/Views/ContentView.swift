@@ -246,6 +246,8 @@ struct ContentView: View {
         
         // MARK: - Toolbar
         .toolbar {
+            Text(chat.isConnected)
+                .padding()
             Button(showGlassEffectBar ? "Hide Glass Bar" : "Show Glass Bar") {
                 if showGlassEffectBar {
                     withAnimation(.timingCurve(0.42, 0, 0.58, 1, duration: 0.4)) {

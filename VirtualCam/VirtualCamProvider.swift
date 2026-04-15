@@ -9,6 +9,16 @@ import Foundation
 import CoreMediaIO
 import IOKit.audio
 import os.log
+import SwiftUI
+import CoreVideo
+
+class VirtualCameraPublisher {
+    // The closure takes a CVPixelBuffer and a CMTime (or any appropriate type for the second argument)
+    var frameSink: ((CVPixelBuffer, CMTime) -> Void)?
+}
+
+// Глобальный синглтон для публикации кадров виртуальной камеры
+let sharedVirtualCameraPublisher = VirtualCameraPublisher()
 
 let kWhiteStripeHeight: Int = 10
 let kFrameRate: Int = 60
@@ -37,6 +47,9 @@ class VirtualCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
 	
 	private var _whiteStripeIsAscending: Bool = false
 	
+	// Хранит последний полученный пиксельный буфер для вывода видео
+	private var latestPixelBuffer: CVPixelBuffer?
+	
 	init(localizedName: String) {
 		
 		super.init()
@@ -64,6 +77,11 @@ class VirtualCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
 		} catch let error {
 			fatalError("Failed to add stream: \(error.localizedDescription)")
 		}
+	}
+	
+	// Метод для обновления последнего пиксельного буфера из внешнего источника
+	func updatePixelBuffer(_ buffer: CVPixelBuffer) {
+		self.latestPixelBuffer = buffer
 	}
 	
 	var availableProperties: Set<CMIOExtensionProperty> {
@@ -106,41 +124,50 @@ class VirtualCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
 			let now = CMClockGetTime(CMClockGetHostTimeClock())
 			
 			var pixelBuffer: CVPixelBuffer?
-			err = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, self._bufferPool, self._bufferAuxAttributes, &pixelBuffer)
-			if err != 0 {
-				os_log(.error, "out of pixel buffers \(err)")
+			
+			// Если есть последний полученный буфер – используем его, иначе рисуем тестовую полосу
+			if let latestBuffer = self.latestPixelBuffer {
+				// Используем latestPixelBuffer напрямую (создаем CMSampleBuffer для него)
+				pixelBuffer = latestBuffer
+			} else {
+				// Создаем новый буфер из пула и рисуем тестовую белую полосу
+				err = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, self._bufferPool, self._bufferAuxAttributes, &pixelBuffer)
+				if err != 0 {
+					os_log(.error, "out of pixel buffers \(err)")
+				}
+				
+				if let pixelBuffer = pixelBuffer {
+					CVPixelBufferLockBaseAddress(pixelBuffer, [])
+					
+					var bufferPtr = CVPixelBufferGetBaseAddress(pixelBuffer)!
+					let width = CVPixelBufferGetWidth(pixelBuffer)
+					let height = CVPixelBufferGetHeight(pixelBuffer)
+					let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
+					memset(bufferPtr, 0, rowBytes * height)
+					
+					let whiteStripeStartRow = self._whiteStripeStartRow
+					if self._whiteStripeIsAscending {
+						self._whiteStripeStartRow = whiteStripeStartRow - 1
+						self._whiteStripeIsAscending = self._whiteStripeStartRow > 0
+					}
+					else {
+						self._whiteStripeStartRow = whiteStripeStartRow + 1
+						self._whiteStripeIsAscending = self._whiteStripeStartRow >= (height - kWhiteStripeHeight)
+					}
+					bufferPtr += rowBytes * Int(whiteStripeStartRow)
+					for _ in 0..<kWhiteStripeHeight {
+						for _ in 0..<width {
+							var white: UInt32 = 0xFFFFFFFF
+							memcpy(bufferPtr, &white, MemoryLayout.size(ofValue: white))
+							bufferPtr += MemoryLayout.size(ofValue: white)
+						}
+					}
+					
+					CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+				}
 			}
 			
 			if let pixelBuffer = pixelBuffer {
-				
-				CVPixelBufferLockBaseAddress(pixelBuffer, [])
-				
-				var bufferPtr = CVPixelBufferGetBaseAddress(pixelBuffer)!
-				let width = CVPixelBufferGetWidth(pixelBuffer)
-				let height = CVPixelBufferGetHeight(pixelBuffer)
-				let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
-				memset(bufferPtr, 0, rowBytes * height)
-				
-				let whiteStripeStartRow = self._whiteStripeStartRow
-				if self._whiteStripeIsAscending {
-					self._whiteStripeStartRow = whiteStripeStartRow - 1
-					self._whiteStripeIsAscending = self._whiteStripeStartRow > 0
-				}
-				else {
-					self._whiteStripeStartRow = whiteStripeStartRow + 1
-					self._whiteStripeIsAscending = self._whiteStripeStartRow >= (height - kWhiteStripeHeight)
-				}
-				bufferPtr += rowBytes * Int(whiteStripeStartRow)
-				for _ in 0..<kWhiteStripeHeight {
-					for _ in 0..<width {
-						var white: UInt32 = 0xFFFFFFFF
-						memcpy(bufferPtr, &white, MemoryLayout.size(ofValue: white))
-						bufferPtr += MemoryLayout.size(ofValue: white)
-					}
-				}
-				
-				CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
-				
 				var sbuf: CMSampleBuffer!
 				var timingInfo = CMSampleTimingInfo()
 				timingInfo.presentationTimeStamp = CMClockGetTime(CMClockGetHostTimeClock())
@@ -271,6 +298,11 @@ class VirtualCamProviderSource: NSObject, CMIOExtensionProviderSource {
 		provider = CMIOExtensionProvider(source: self, clientQueue: clientQueue)
 		deviceSource = VirtualCamDeviceSource(localizedName: "SampleCapture (Swift)")
 		
+		// Настраиваем подписку на новые кадры из глобального издателя виртуальной камеры
+		sharedVirtualCameraPublisher.frameSink = { [weak deviceSource] (pixelBuffer: CVPixelBuffer, _: CMTime) in
+			deviceSource?.updatePixelBuffer(pixelBuffer)
+		}
+		
 		do {
 			try provider.addDevice(deviceSource.device)
 		} catch let error {
@@ -308,3 +340,4 @@ class VirtualCamProviderSource: NSObject, CMIOExtensionProviderSource {
 		// Handle settable properties here.
 	}
 }
+

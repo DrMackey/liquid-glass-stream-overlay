@@ -99,7 +99,7 @@ struct MessageTextView: View {
             .opacity(0.9)
             .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 0)
             .padding()
-            .glassEffect(.regular)
+            .glassEffect(.clear)
 //            .glassEffectTransition(.matchedGeometry)
 //            .glassEffectID("nick", in: namespace)
         }
@@ -154,7 +154,7 @@ struct MessageTextView: View {
                     .opacity(0.9)
                     .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 0)
                     .padding()
-                    .glassEffect(.regular)
+                    .glassEffect(.clear)
 //                    .glassEffectTransition(.matchedGeometry)
 //                    .glassEffectID("message", in: namespace)
                 }
@@ -212,7 +212,7 @@ struct MessageTextView: View {
             ProgressView()
                 .frame(maxWidth: 16, maxHeight: 16)
                 .padding()
-                .glassEffect(.regular)
+                .glassEffect(.clear)
         }
     }
 }

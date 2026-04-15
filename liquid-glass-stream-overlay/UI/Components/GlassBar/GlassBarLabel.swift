@@ -103,6 +103,8 @@ struct GlassBarLabel: View {
 
             let visibleMessages: [TwitchChatManager.Message] = visIndices.map { messages[$0] }
             
+            
+            
             ZStack(alignment: .top) {
                 ForEach(visibleMessages) { message in
                     let idx = visibleMessages.firstIndex(where: { $0.id == message.id }) ?? 0
@@ -117,14 +119,24 @@ struct GlassBarLabel: View {
                             isTruncated: false
                         )
                         let layout = MessageLayout(message: display, index: idx, isCollapsed: false, stackPosition: idx)
-                        CollapsibleMessageView(
-                            layout: layout,
-                            maxWidth: geo.size.width,
-                            totalCount: visibleMessages.count,
-                            contentPaddingH: 24,
-                            contentPaddingV: 20,
-                            bubbleCornerRadius: 32
-                        )
+
+                        HStack(alignment: .top, spacing: 8) {
+                            Image("Twitch.icon")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 20, height: 20)
+                                .accessibilityLabel("Twitch")
+                                .padding(.top, 6)
+
+                            CollapsibleMessageView(
+                                layout: layout,
+                                maxWidth: geo.size.width,
+                                totalCount: visibleMessages.count,
+                                contentPaddingH: 24,
+                                contentPaddingV: 20,
+                                bubbleCornerRadius: 32
+                            )
+                        }
                         .matchedGeometryEffect(id: message.id, in: messageAnim)
                         .offset(y: y)
                         .transition(.asymmetric(insertion: insertionTransition, removal: removalTransition))
