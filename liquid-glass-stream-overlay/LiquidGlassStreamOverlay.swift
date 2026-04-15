@@ -1,5 +1,4 @@
 import SwiftUI
-#if os(macOS)
 import AppKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -7,13 +6,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Additional setup after launch can go here
     }
 }
-#endif
 
 @main
 struct NewTestApp: App {
-    #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    #endif
     var body: some Scene {
         WindowGroup {
             ContentView()

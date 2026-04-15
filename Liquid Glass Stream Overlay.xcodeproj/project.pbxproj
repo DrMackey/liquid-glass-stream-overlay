@@ -24,7 +24,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		E4B1AD202E479A31006EBE1F /* liquid-glass-stream-overlay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "liquid-glass-stream-overlay.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E4B1AD202E479A31006EBE1F /* Liquid Glass Stream Overlay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Liquid Glass Stream Overlay.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -58,7 +58,7 @@
 		E4B1AD212E479A31006EBE1F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				E4B1AD202E479A31006EBE1F /* liquid-glass-stream-overlay.app */,
+				E4B1AD202E479A31006EBE1F /* Liquid Glass Stream Overlay.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -66,9 +66,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		E4B1AD1F2E479A31006EBE1F /* liquid-glass-stream-overlay */ = {
+		E4B1AD1F2E479A31006EBE1F /* Liquid Glass Stream Overlay */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = E4B1AD2B2E479A33006EBE1F /* Build configuration list for PBXNativeTarget "liquid-glass-stream-overlay" */;
+			buildConfigurationList = E4B1AD2B2E479A33006EBE1F /* Build configuration list for PBXNativeTarget "Liquid Glass Stream Overlay" */;
 			buildPhases = (
 				E4B1AD1C2E479A31006EBE1F /* Sources */,
 				E4B1AD1D2E479A31006EBE1F /* Frameworks */,
@@ -82,12 +82,12 @@
 			fileSystemSynchronizedGroups = (
 				E4B1AD222E479A31006EBE1F /* liquid-glass-stream-overlay */,
 			);
-			name = "liquid-glass-stream-overlay";
+			name = "Liquid Glass Stream Overlay";
 			packageProductDependencies = (
 				E46247972E548DAF00679E6E /* SDWebImageSwiftUI */,
 			);
 			productName = "New Test App";
-			productReference = E4B1AD202E479A31006EBE1F /* liquid-glass-stream-overlay.app */;
+			productReference = E4B1AD202E479A31006EBE1F /* Liquid Glass Stream Overlay.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -105,7 +105,7 @@
 					};
 				};
 			};
-			buildConfigurationList = E4B1AD1B2E479A31006EBE1F /* Build configuration list for PBXProject "liquid-glass-stream-overlay" */;
+			buildConfigurationList = E4B1AD1B2E479A31006EBE1F /* Build configuration list for PBXProject "Liquid Glass Stream Overlay" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -122,7 +122,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				E4B1AD1F2E479A31006EBE1F /* liquid-glass-stream-overlay */,
+				E4B1AD1F2E479A31006EBE1F /* Liquid Glass Stream Overlay */,
 			);
 		};
 /* End PBXProject section */
@@ -383,7 +383,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		E4B1AD1B2E479A31006EBE1F /* Build configuration list for PBXProject "liquid-glass-stream-overlay" */ = {
+		E4B1AD1B2E479A31006EBE1F /* Build configuration list for PBXProject "Liquid Glass Stream Overlay" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E4B1AD292E479A33006EBE1F /* Debug */,
@@ -392,7 +392,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		E4B1AD2B2E479A33006EBE1F /* Build configuration list for PBXNativeTarget "liquid-glass-stream-overlay" */ = {
+		E4B1AD2B2E479A33006EBE1F /* Build configuration list for PBXNativeTarget "Liquid Glass Stream Overlay" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E4B1AD2C2E479A33006EBE1F /* Debug */,

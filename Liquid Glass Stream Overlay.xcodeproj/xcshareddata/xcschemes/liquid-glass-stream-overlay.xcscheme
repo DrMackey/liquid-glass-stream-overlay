@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "E4B1AD1F2E479A31006EBE1F"
-               BuildableName = "liquid-glass-stream-overlay.app"
-               BlueprintName = "liquid-glass-stream-overlay"
-               ReferencedContainer = "container:liquid-glass-stream-overlay.xcodeproj">
+               BuildableName = "Liquid Glass Stream Overlay.app"
+               BlueprintName = "Liquid Glass Stream Overlay"
+               ReferencedContainer = "container:Liquid Glass Stream Overlay.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -45,9 +45,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E4B1AD1F2E479A31006EBE1F"
-            BuildableName = "liquid-glass-stream-overlay.app"
-            BlueprintName = "liquid-glass-stream-overlay"
-            ReferencedContainer = "container:liquid-glass-stream-overlay.xcodeproj">
+            BuildableName = "Liquid Glass Stream Overlay.app"
+            BlueprintName = "Liquid Glass Stream Overlay"
+            ReferencedContainer = "container:Liquid Glass Stream Overlay.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <EnvironmentVariables>
@@ -69,9 +69,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E4B1AD1F2E479A31006EBE1F"
-            BuildableName = "liquid-glass-stream-overlay.app"
-            BlueprintName = "liquid-glass-stream-overlay"
-            ReferencedContainer = "container:liquid-glass-stream-overlay.xcodeproj">
+            BuildableName = "Liquid Glass Stream Overlay.app"
+            BlueprintName = "Liquid Glass Stream Overlay"
+            ReferencedContainer = "container:Liquid Glass Stream Overlay.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

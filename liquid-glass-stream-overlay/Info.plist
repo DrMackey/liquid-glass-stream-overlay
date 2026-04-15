@@ -15,5 +15,7 @@
 	<string>$(TWITCH_HELIX_CLIENT_ID)</string>
 	<key>TWITCH_HELIX_BEARER_TOKEN</key>
 	<string>$(TWITCH_HELIX_BEARER_TOKEN)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Liquid Glass Stream Overlay</string>
 </dict>
 </plist>

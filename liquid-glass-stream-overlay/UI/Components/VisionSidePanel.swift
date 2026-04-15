@@ -4,9 +4,7 @@
 import SwiftUI
 
 struct VisionSidePanel: View {
-    #if os(macOS)
     @State private var hoverIndex: Int? = nil
-    #endif
 
     private let icons: [String] = [
         "bolt.fill", "gamecontroller.fill", "message.fill",
@@ -37,7 +35,6 @@ struct VisionSidePanel: View {
                         }
                     )
                     .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
-                    #if os(macOS)
                     .onHover { isHover in
                         withAnimation(.easeInOut(duration: 0.2)) {
                             hoverIndex = isHover ? idx : nil
@@ -45,7 +42,6 @@ struct VisionSidePanel: View {
                     }
                     .scaleEffect(hoverIndex == idx ? 1.06 : 1.0)
                     .opacity(hoverIndex == idx ? 1.0 : 0.92)
-                    #endif
             }
         }
         .padding(12)
