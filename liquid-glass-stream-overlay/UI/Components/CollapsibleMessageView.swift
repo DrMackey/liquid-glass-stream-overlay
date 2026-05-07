@@ -237,7 +237,6 @@ struct CollapsibleMessageView: View {
     */
     var body: some View {
         messageContent
-//            .fixedSize(horizontal: false, vertical: true)
 //            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, contentPaddingH)
             .padding(.vertical, contentPaddingV)
@@ -383,3 +382,4 @@ private extension Color {
         return (R << 24) | (G << 16) | (B << 8) | A
     }
 }
+

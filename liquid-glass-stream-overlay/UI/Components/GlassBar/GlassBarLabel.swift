@@ -30,18 +30,18 @@ struct GlassBarLabel: View {
     let spacing: CGFloat = 16
     @Namespace private var messageAnim
 
-    @State private var messageHeights: [TwitchChatManager.Message.ID: CGFloat] = [:]
+    @State private var messageHeights: [Message.ID: CGFloat] = [:]
     
     // ДОБАВЬТЕ ЭТУ ПЕРЕМЕННУЮ: для отслеживания последнего обработанного сообщения
-    @State private var lastProcessedMessageId: TwitchChatManager.Message.ID? = nil
+    @State private var lastProcessedMessageId: Message.ID? = nil
 
     // MARK: - Computation helpers to reduce type-checking complexity
-    private func messagesSource(availableMessages: [TwitchChatManager.Message], availableNotifications: [TwitchChatManager.Message], isNotification: Bool) -> [TwitchChatManager.Message] {
+    private func messagesSource(availableMessages: [Message], availableNotifications: [Message], isNotification: Bool) -> [Message] {
         if isNotification { return availableNotifications }
         return availableMessages
     }
 
-    private func computeOffsets(for messages: [TwitchChatManager.Message], messageHeights: [TwitchChatManager.Message.ID: CGFloat], spacing: CGFloat) -> [CGFloat] {
+    private func computeOffsets(for messages: [Message], messageHeights: [Message.ID: CGFloat], spacing: CGFloat) -> [CGFloat] {
         var result: [CGFloat] = []
         result.reserveCapacity(messages.count)
         var currentOffset: CGFloat = 0
@@ -53,7 +53,7 @@ struct GlassBarLabel: View {
         return result
     }
 
-    private func visibleIndices(offsets: [CGFloat], messages: [TwitchChatManager.Message], availableHeight: CGFloat, messageHeights: [TwitchChatManager.Message.ID: CGFloat]) -> [Int] {
+    private func visibleIndices(offsets: [CGFloat], messages: [Message], availableHeight: CGFloat, messageHeights: [Message.ID: CGFloat]) -> [Int] {
         var indices: [Int] = []
         indices.reserveCapacity(messages.count)
         for (idx, offset) in offsets.enumerated() {
@@ -67,12 +67,12 @@ struct GlassBarLabel: View {
     var body: some View {
         GeometryReader { geo in
             let availableHeight: CGFloat = geo.size.height
-            let baseMessages: [TwitchChatManager.Message] = Array(chat.messages.suffix(maxVisibleMessages).reversed())
+            let baseMessages: [Message] = Array(chat.messages.suffix(maxVisibleMessages).reversed())
             let baseNotificationsRaw = Array(chat.notifications.suffix(maxVisibleMessages).reversed())
 
             // Map notifications to Message explicitly to reduce inference work
-            let notificationsAsMessages: [TwitchChatManager.Message] = baseNotificationsRaw.map { notif in
-                TwitchChatManager.Message(
+            let notificationsAsMessages: [Message] = baseNotificationsRaw.map { notif in
+                Message(
                     id: notif.id,
                     sender: notif.sender,
                     text: notif.text,
@@ -82,7 +82,7 @@ struct GlassBarLabel: View {
                 )
             }
 
-            let messages: [TwitchChatManager.Message] = messagesSource(
+            let messages: [Message] = messagesSource(
                 availableMessages: baseMessages,
                 availableNotifications: notificationsAsMessages,
                 isNotification: isNotifictaion
@@ -101,7 +101,7 @@ struct GlassBarLabel: View {
                 messageHeights: messageHeights
             )
 
-            let visibleMessages: [TwitchChatManager.Message] = visIndices.map { messages[$0] }
+            let visibleMessages: [Message] = visIndices.map { messages[$0] }
             
             
             
@@ -121,12 +121,12 @@ struct GlassBarLabel: View {
                         let layout = MessageLayout(message: display, index: idx, isCollapsed: false, stackPosition: idx)
 
                         HStack(alignment: .top, spacing: 8) {
-                            Image("Twitch.icon")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 20, height: 20)
-                                .accessibilityLabel("Twitch")
-                                .padding(.top, 6)
+//                            Image("Twitch.icon")
+//                                .resizable()
+//                                .scaledToFit()
+//                                .frame(width: 20, height: 20)
+//                                .accessibilityLabel("Twitch")
+//                                .padding(.top, 6)
 
                             CollapsibleMessageView(
                                 layout: layout,
@@ -178,8 +178,8 @@ struct GlassBarLabel: View {
     }
 
     private struct MessageHeightKey: PreferenceKey {
-        static var defaultValue: [TwitchChatManager.Message.ID: CGFloat] = [:]
-        static func reduce(value: inout [TwitchChatManager.Message.ID: CGFloat], nextValue: () -> [TwitchChatManager.Message.ID: CGFloat]) {
+        static var defaultValue: [Message.ID: CGFloat] = [:]
+        static func reduce(value: inout [Message.ID: CGFloat], nextValue: () -> [Message.ID: CGFloat]) {
             value.merge(nextValue()) { $1 }
         }
     }

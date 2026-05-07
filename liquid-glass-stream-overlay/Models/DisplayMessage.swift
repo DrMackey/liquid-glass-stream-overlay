@@ -6,15 +6,14 @@
 //
 
 import Foundation
+import SwiftUI
 
-// Модель эмоута Twitch (Helix chat/emotes)
-/// Структура для парсинга твитч эмоут
-struct Emote: Decodable, Hashable {
-    let id: String
-    let name: String
-    let images: Images
-    let format: [String]?
-    struct Images: Decodable, Hashable {
-        let url_1x: String
-    }
+// MARK: - DisplayMessage
+struct DisplayMessage: Identifiable {
+    let id = UUID()
+    let badges: [BadgeViewData]
+    let sender: String
+    let senderColor: Color
+    let visibleParts: [MessagePart]
+    let isTruncated: Bool
 }

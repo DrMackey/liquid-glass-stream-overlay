@@ -7,14 +7,15 @@
 
 import Foundation
 
-// Модель эмоута Twitch (Helix chat/emotes)
-/// Структура для парсинга твитч эмоут
-struct Emote: Decodable, Hashable {
-    let id: String
-    let name: String
-    let images: Images
-    let format: [String]?
-    struct Images: Decodable, Hashable {
-        let url_1x: String
-    }
+struct BadgeViewData: Identifiable, Hashable, Equatable {
+    let id = UUID()
+    let set: String
+    let version: String
+    let url: URL?
+}
+
+struct BadgeInfo: Hashable {
+    let set: String
+    let version: String
+    let imageUrl: String
 }

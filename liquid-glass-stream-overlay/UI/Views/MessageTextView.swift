@@ -10,7 +10,7 @@ struct MessageTextView: View {
     let maxWidth: CGFloat
     let badgeViews: ([(String, String)]) -> [BadgeViewData]
     let isTruncated: Bool
-    let message: TwitchChatManager.Message
+    let message: Message
     
     // Внутренняя структура с уже рассчитанными данными для рисования
     private struct ProcessedMessage {

@@ -7,10 +7,8 @@ import SwiftUI
 import AVFoundation
 import Combine
 import Foundation
-
-#if os(macOS)
 import AppKit
-#endif
+
 
 final class CameraCaptureManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     @Published var image: CIImage?

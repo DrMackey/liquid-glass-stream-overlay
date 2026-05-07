@@ -1,53 +1,79 @@
 import Foundation
 
-// MARK: - Загрузка бейджей
-func loadAllBadges(channelLogin: String, manager: TwitchChatManager) async {
-    // Общие типы для парсинга бейджей
-    struct BadgeVersion: Decodable { let id: String; let image_url_2x: String? }
-    struct BadgeSet: Decodable { let set_id: String; let versions: [BadgeVersion] }
-    struct HelixResponse: Decodable { let data: [BadgeSet] }
-
-    var mergedBadges: [String: [String: String]] = [:]
-
-    // Параллельная загрузка глобальных и канальных бейджей
-    async let globalTask: [BadgeSet] = {
-        do {
-            let url = URL(string: "https://api.twitch.tv/helix/chat/badges/global")!
-            var req = URLRequest(url: url)
-            req.addValue("Bearer \(TWITCH_HELIX_BEARER_TOKEN)", forHTTPHeaderField: "Authorization")
-            req.addValue(TWITCH_HELIX_CLIENT_ID, forHTTPHeaderField: "Client-Id")
-            let (data, _) = try await URLSession.shared.data(for: req)
-            return (try JSONDecoder().decode(HelixResponse.self, from: data)).data
-        } catch {
-            print("Ошибка загрузки глобальных бейджей: \(error)")
-            return []
+// MARK: - Stream Info
+extension TwitchChatManager {
+    private struct ChannelsResponse: Decodable {
+        struct Channel: Decodable {
+            let broadcaster_id: String
+            let title: String
+            let game_id: String
+            let game_name: String
         }
-    }()
-
-    async let channelTask: [BadgeSet] = {
-        do {
-            let userId = try await TwitchChatManager.sharedChannelId(login: channelLogin)
-            let url = URL(string: "https://api.twitch.tv/helix/chat/badges?broadcaster_id=\(userId)")!
-            var req = URLRequest(url: url)
-            req.addValue("Bearer \(TWITCH_HELIX_BEARER_TOKEN)", forHTTPHeaderField: "Authorization")
-            req.addValue(TWITCH_HELIX_CLIENT_ID, forHTTPHeaderField: "Client-Id")
-            let (data, _) = try await URLSession.shared.data(for: req)
-            return (try JSONDecoder().decode(HelixResponse.self, from: data)).data
-        } catch {
-            print("Ошибка загрузки канальных бейджей: \(error)")
-            return []
-        }
-    }()
-
-    let (globalSets, channelSets) = await (globalTask, channelTask)
-
-    for set in globalSets + channelSets {
-        var ver: [String: String] = mergedBadges[set.set_id] ?? [:]
-        for v in set.versions {
-            if let url = v.image_url_2x, !url.isEmpty { ver[v.id] = url }
-        }
-        if !ver.isEmpty { mergedBadges[set.set_id] = ver }
+        let data: [Channel]
     }
 
-    DispatchQueue.main.async { manager.allBadgeImages = mergedBadges }
+    private struct GamesResponse: Decodable {
+        struct Game: Decodable { let id: String; let name: String; let box_art_url: String }
+        let data: [Game]
+    }
+
+    func runStreamInfoLoop() async {
+        if channelId == nil {
+            if let id = try? await TwitchChatManager.sharedChannelId(login: TWITCH_CHANNEL) {
+                self.channelId = id
+            } else {
+                print("[TwitchChat] fetchChannelId failed")
+            }
+        }
+        while !Task.isCancelled {
+            await refreshStreamInfo()
+            try? await Task.sleep(nanoseconds: Constants.streamInfoInterval)
+        }
+    }
+
+    @MainActor
+    private func applyChannel(title: String, gameName: String) {
+        if streamTitle != title { streamTitle = title }
+        if categoryName != gameName { categoryName = gameName }
+    }
+
+    @MainActor
+    private func applyGameImage(url: URL?) {
+        if categoryImageURL != url { categoryImageURL = url }
+    }
+
+    private func refreshStreamInfo() async {
+        do {
+            if channelId == nil {
+                channelId = try await TwitchChatManager.sharedChannelId(login: TWITCH_CHANNEL)
+            }
+            guard let id = channelId else { return }
+
+            let chURL = URL(string: "https://api.twitch.tv/helix/channels?broadcaster_id=\(id)")!
+            var chReq = URLRequest(url: chURL)
+            addHelixHeaders(&chReq)
+            let (chData, _) = try await URLSession.shared.data(for: chReq)
+            let channel = try JSONDecoder().decode(ChannelsResponse.self, from: chData).data.first
+            guard let channel else { return }
+
+            await applyChannel(title: channel.title, gameName: channel.game_name)
+
+            if !channel.game_id.isEmpty {
+                let gURL = URL(string: "https://api.twitch.tv/helix/games?id=\(channel.game_id)")!
+                var gReq = URLRequest(url: gURL)
+                addHelixHeaders(&gReq)
+                let (gData, _) = try await URLSession.shared.data(for: gReq)
+                let boxTemplate = (try JSONDecoder().decode(GamesResponse.self, from: gData)).data.first?.box_art_url ?? ""
+                let finalURL = URL(string: boxTemplate
+                    .replacingOccurrences(of: "{width}", with: "300")
+                    .replacingOccurrences(of: "{height}", with: "450"))
+                await applyGameImage(url: finalURL)
+            } else {
+                await applyGameImage(url: nil)
+            }
+        } catch {
+            print("Ошибка обновления информации о стриме: \(error)")
+        }
+    }
 }
+

@@ -4,7 +4,7 @@
 import SwiftUI
 
 struct MessageStackView: View {
-    let messages: [TwitchChatManager.Message]
+    let messages: [Message]
     let availableHeight: CGFloat
     let maxWidth: CGFloat
     let chat: TwitchChatManager

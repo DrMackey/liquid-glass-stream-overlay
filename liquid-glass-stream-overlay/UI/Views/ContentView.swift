@@ -298,11 +298,11 @@ struct ContentView: View {
                 startLocalHTTPServer()
             }
             Task {
-                await chat.loadAllBadges(channelLogin: TWITCH_CHANNEL)
+                await loadAllBadges(channelLogin: TWITCH_CHANNEL, manager: chat)
                 await chat.loadGlobalEmotes()
                 if let msg = chat.lastMessage {
                     let badgeViewData = chat.badgeViews(from: msg.badges, badgeUrlMap: chat.allBadgeImages)
-                    chat.lastMessage = TwitchChatManager.Message(
+                    chat.lastMessage = Message(
                         sender: msg.sender,
                         text: msg.text,
                         badges: msg.badges,
