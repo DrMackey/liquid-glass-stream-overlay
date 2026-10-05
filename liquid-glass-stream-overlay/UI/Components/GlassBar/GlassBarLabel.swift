@@ -21,7 +21,7 @@ struct SoundPlayer {
 
 struct GlassBarLabel: View {
     @ObservedObject var chat: TwitchChatManager
-    var isNotifictaion: Bool = false
+    var isNotification: Bool = false
     // New external animation transition parameters with sensible defaults matching previous behavior
     var insertionTransition: AnyTransition = .scale.combined(with: .opacity)
     var removalTransition: AnyTransition = .move(edge: .bottom).combined(with: .opacity)
@@ -85,7 +85,7 @@ struct GlassBarLabel: View {
             let messages: [Message] = messagesSource(
                 availableMessages: baseMessages,
                 availableNotifications: notificationsAsMessages,
-                isNotification: isNotifictaion
+                isNotification: isNotification
             )
 
             let offsets: [CGFloat] = computeOffsets(
@@ -121,12 +121,6 @@ struct GlassBarLabel: View {
                         let layout = MessageLayout(message: display, index: idx, isCollapsed: false, stackPosition: idx)
 
                         HStack(alignment: .top, spacing: 8) {
-//                            Image("Twitch.icon")
-//                                .resizable()
-//                                .scaledToFit()
-//                                .frame(width: 20, height: 20)
-//                                .accessibilityLabel("Twitch")
-//                                .padding(.top, 6)
 
                             CollapsibleMessageView(
                                 layout: layout,
@@ -134,7 +128,8 @@ struct GlassBarLabel: View {
                                 totalCount: visibleMessages.count,
                                 contentPaddingH: 24,
                                 contentPaddingV: 20,
-                                bubbleCornerRadius: 32
+                                bubbleCornerRadius: 32,
+                                isNotification: isNotification
                             )
                         }
                         .matchedGeometryEffect(id: message.id, in: messageAnim)
@@ -164,7 +159,7 @@ struct GlassBarLabel: View {
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.82), value: visibleMessages.map(\.id))
             .onChange(of: visibleMessages.first?.id) { newFirstId in
-                guard isNotifictaion else { return }
+                guard isNotification else { return }
                 guard let newId = newFirstId else { return }
                 if newId != lastProcessedMessageId {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -184,3 +179,4 @@ struct GlassBarLabel: View {
         }
     }
 }
+

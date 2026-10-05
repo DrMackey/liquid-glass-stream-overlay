@@ -22,6 +22,7 @@ struct CollapsibleMessageView: View {
     var contentPaddingH: CGFloat = 12  // Горизонтальные отступы внутри пузыря
     var contentPaddingV: CGFloat = 10  // Вертикальные отступы внутри пузыря
     var bubbleCornerRadius: CGFloat = 16  // Радиус скругления углов пузыря
+    let isNotification: Bool
     
     init(
         layout: MessageLayout,
@@ -29,7 +30,8 @@ struct CollapsibleMessageView: View {
         totalCount: Int,
         contentPaddingH: CGFloat = 12,
         contentPaddingV: CGFloat = 10,
-        bubbleCornerRadius: CGFloat = 16
+        bubbleCornerRadius: CGFloat = 16,
+        isNotification: Bool
     ) {
         self.layout = layout
         self.maxWidth = maxWidth
@@ -37,6 +39,7 @@ struct CollapsibleMessageView: View {
         self.contentPaddingH = contentPaddingH
         self.contentPaddingV = contentPaddingV
         self.bubbleCornerRadius = bubbleCornerRadius
+        self.isNotification = isNotification
     }
     
     /*
@@ -196,35 +199,45 @@ struct CollapsibleMessageView: View {
     }
     
     private var messageContent: some View {
-        FlowRows(items: buildFlowItems(), hSpacing: 6, vSpacing: 2, rowAlignment: .firstTextBaseline, spacingProvider: { current, next in
-            // Если текущий и следующий элементы — слова, не добавляем межэлементный отступ, пробел уже входит в токен
-            let currentIsWord: Bool
-            let nextIsWord: Bool
-            switch (current as! FlowItem).kind { case .word: currentIsWord = true; default: currentIsWord = false }
-            if let next = next {
-                switch (next as! FlowItem).kind { case .word: nextIsWord = true; default: nextIsWord = false }
-            } else { nextIsWord = false }
-            return (currentIsWord && nextIsWord) ? 0 : 6
-        }) { item in
-            switch item.kind {
-            case .badges(let badges, let scale):
-                BadgeIconsView(badges: badges, scale: scale)
-            case .sender(let name, let color, let size):
-                Text(name)
-                    .bold()
-                    .foregroundColor(color)
-                    .font(.system(size: size))
-                    .lineLimit(1)
-//                    .background(Color.red)
-            case .word(let token, let size):
-                Text(token)
-                    .foregroundColor(.primary)
-                    .font(.system(size: size))
-                    .lineLimit(1) // каждый токен — одна строка, перенос делаем на уровне лэйаута
-//                    .background(Color.green)
-            case .emote(let url, let size, let animated):
-                EmoteImageView(url: url, size: size, animated: animated)
-//                    .background(Color.red)
+        HStack(spacing: 16) {
+            if (isNotification) {
+                    Image("Twitch")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 60, height: 60)
+//                        .padding(.top, 6)
+            }
+            
+            FlowRows(items: buildFlowItems(), hSpacing: 6, vSpacing: 2, rowAlignment: .firstTextBaseline, spacingProvider: { current, next in
+                // Если текущий и следующий элементы — слова, не добавляем межэлементный отступ, пробел уже входит в токен
+                let currentIsWord: Bool
+                let nextIsWord: Bool
+                switch (current as! FlowItem).kind { case .word: currentIsWord = true; default: currentIsWord = false }
+                if let next = next {
+                    switch (next as! FlowItem).kind { case .word: nextIsWord = true; default: nextIsWord = false }
+                } else { nextIsWord = false }
+                return (currentIsWord && nextIsWord) ? 0 : 6
+            }) { item in
+                switch item.kind {
+                case .badges(let badges, let scale):
+                    BadgeIconsView(badges: badges, scale: scale)
+                case .sender(let name, let color, let size):
+                    Text(name)
+                        .bold()
+                        .foregroundColor(color)
+                        .font(.system(size: size))
+                        .lineLimit(1)
+    //                    .background(Color.red)
+                case .word(let token, let size):
+                    Text(token)
+                        .foregroundColor(.primary)
+                        .font(.system(size: size))
+                        .lineLimit(1) // каждый токен — одна строка, перенос делаем на уровне лэйаута
+    //                    .background(Color.green)
+                case .emote(let url, let size, let animated):
+                    EmoteImageView(url: url, size: size, animated: animated)
+    //                    .background(Color.red)
+                }
             }
         }
     }
@@ -236,17 +249,17 @@ struct CollapsibleMessageView: View {
      Анимация зависит от изменений состояния свернутости.
     */
     var body: some View {
-        messageContent
-//            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, contentPaddingH)
-            .padding(.vertical, contentPaddingV)
-            .glassEffect(.regular, in: .rect(cornerRadius: bubbleCornerRadius))
-            .scaleEffect(scaleEffect)
-            .offset(y: yOffset)
-            .opacity(opacity)
-            .zIndex(zIndex)
-            .animation(.spring(response: 0.9, dampingFraction: 0.7), value: layout.isCollapsed)
-    }
+            messageContent
+    //            .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, contentPaddingH)
+                .padding(.vertical, contentPaddingV)
+                .glassEffect(.regular, in: .rect(cornerRadius: bubbleCornerRadius))
+                .scaleEffect(scaleEffect)
+                .offset(y: yOffset)
+                .opacity(opacity)
+                .zIndex(zIndex)
+                .animation(.spring(response: 0.9, dampingFraction: 0.7), value: layout.isCollapsed)
+        }
 }
 
 // MARK: - FlowRows: simple wrapping layout for inline items

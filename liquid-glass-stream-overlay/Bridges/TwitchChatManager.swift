@@ -30,9 +30,18 @@ class Config {
     }
 }
 
+//let TWITCH_HELIX_BASE_URL = "https://api.twitch.tv/helix"
+let TWITCH_HELIX_BASE_URL = "http://localhost:8080/mock"
+
+//Авторизационные данные для основы
+//let TWITCH_CHANNEL = Config.shared.TwitchChannel
+//let TWITCH_HELIX_CLIENT_ID = Config.shared.TwitchHelixClientID
+//let TWITCH_HELIX_BEARER_TOKEN = Config.shared.TwitchHelixBearerToken
+
+//Дебаг режим
 let TWITCH_CHANNEL = Config.shared.TwitchChannel
-let TWITCH_HELIX_CLIENT_ID = Config.shared.TwitchHelixClientID
-let TWITCH_HELIX_BEARER_TOKEN = Config.shared.TwitchHelixBearerToken
+let TWITCH_HELIX_CLIENT_ID = "xbhqka8dire6qufn4xttrrcylalpil"
+let TWITCH_HELIX_BEARER_TOKEN = "iigl9icsx0kyc973amwr1rb4lyo699"
 
 // MARK: - Модель частей сообщения (текст/эмоут)
 enum MessagePart: Hashable {
@@ -82,7 +91,7 @@ final class TwitchChatManager: ObservableObject {
 
             Task {
                 do {
-                    let url = URL(string: "https://api.twitch.tv/helix/users?login=\(login.lowercased())")!
+                    let url = URL(string: "\(TWITCH_HELIX_BASE_URL)/users?login=\(login.lowercased())")!
                     var req = URLRequest(url: url)
                     req.addValue("Bearer \(TWITCH_HELIX_BEARER_TOKEN)", forHTTPHeaderField: "Authorization")
                     req.addValue(TWITCH_HELIX_CLIENT_ID, forHTTPHeaderField: "Client-Id")
@@ -143,7 +152,8 @@ final class TwitchChatManager: ObservableObject {
     // MARK: - EventSub (WebSocket)
     private var eventSubWebSocketTask: URLSessionWebSocketTask?
     private var eventSubSessionId: String?
-    private let eventSubURL = URL(string: "wss://eventsub.wss.twitch.tv/ws")!
+//    private let eventSubURL = URL(string: "wss://eventsub.wss.twitch.tv/ws")!
+    private let eventSubURL = URL(string: "ws://127.0.0.1:8080/ws")!
     private let urlSession = URLSession(configuration: .default)
 
     /// Счётчик и задержка для exponential backoff при переподключении
@@ -224,16 +234,37 @@ final class TwitchChatManager: ObservableObject {
             print("[EventSub] Не удалось определить user_id для подписки")
             return
         }
-
+        
+    // https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/
         let desiredTypes = [
-            "channel.channel_points_custom_reward_redemption.add",
-            "channel.chat.message"
+            "channel.channel_points_custom_reward_redemption.add", // Поддержано | Использование баллов канала
+            "channel.chat.message", // Поддержано | Любой пользователь получает сообщение в чат
+            "channel.chat.clear", // Чат был очищен
+            "channel.chat.clear_user_messages", // Были удалены все сообщения от конкретного пользователя
+            "channel.chat.message_delete", // Конкретное сообщение было удалено
+            "channel.chat.notification", // уведомление при возникновении события в чате, например, при подписке на канал или при получении подарка в виде подписки
+            "channel.follow", // Бесплатная подписка на канал
+            "channel.subscribe", // Платная подписка на канал, без учета повторных подписок
+            "channel.subscription.end", // Окончание подписки на указанный канал
+            "channel.subscription.gift", // Подарочная платная подписка
+            "channel.subscription.message", // Уведомлении при повторной платной подписке
+            "channel.raid", // Рейд на канал
+            "channel.goal.progress", // Прогресс об изменениях в цели
+            "channel.goal.end", // Завершение цели
+            "channel.update", // Обовление данных о трансляции (название, категория)
+            "channel.ban", // Пользователь был заблокирован
+            "channel.unban", // Пользователь был разблокирован
+            "channel.vip.add", // Был добавлен VIP
+            "channel.vip.remove", // VIP Был удален
+            "channel.hype_train.begin", // Старт хайптрейна
+            "channel.hype_train.progress", // Хайптрейн набирает обороты
+            "channel.hype_train.end", // Завершение хайптрейна
         ]
 
         // Получаем активные подписки
         var activeTypes = Set<String>()
         do {
-            let getURL = URL(string: "https://api.twitch.tv/helix/eventsub/subscriptions?status=enabled")!
+            let getURL = URL(string: "\(TWITCH_HELIX_BASE_URL)/eventsub/subscriptions?status=enabled")!
             var getReq = URLRequest(url: getURL)
             getReq.httpMethod = "GET"
             addHelixHeaders(&getReq)
@@ -249,7 +280,7 @@ final class TwitchChatManager: ObservableObject {
         // Подписываемся на недостающие типы
         for t in desiredTypes where !activeTypes.contains(t) {
             do {
-                let url = URL(string: "https://api.twitch.tv/helix/eventsub/subscriptions")!
+                let url = URL(string: "\(TWITCH_HELIX_BASE_URL)/eventsub/subscriptions")!
                 var req = URLRequest(url: url)
                 req.httpMethod = "POST"
                 addHelixHeaders(&req)
@@ -369,7 +400,6 @@ extension TwitchChatManager {
 
     // MARK: - Обработка JSON сообщений EventSub
     private func handleEventSubJSONString(_ text: String) {
-        print("[EventSub] <- \(text.prefix(200))")
 
         struct Envelope: Decodable {
             struct Metadata: Decodable { let message_type: String; let subscription_type: String? }
@@ -386,27 +416,30 @@ extension TwitchChatManager {
 
         let type = env.metadata.message_type
         let subType = env.metadata.subscription_type
+        
+        print("[EventSub] [\(subType)] <- \(text)")
 
         switch type {
         case "session_welcome":
             if let id = env.payload?.session?.id {
                 eventSubSessionId = id
                 reconnectAttempt = 0  // Успешное подключение — сбрасываем счётчик
-                print("[EventSub] session_welcome. session_id=\(id)")
+//                print("[EventSub] [session_welcome]. session_id=\(id)")
                 Task { await self.subscribeToEventSub(sessionId: id) }
             }
 
         case "session_reconnect":
             // Twitch просит переподключиться к новому URL
-            print("[EventSub] session_reconnect — переподключаемся")
+//            print("[EventSub] [session_reconnect] — переподключаемся")
             DispatchQueue.main.async { self.isConnected = "Переподключение…" }
             scheduleReconnect(immediately: true)
 
-        case "session_keepalive":
-            print("[EventSub] keepalive")
+//        case "session_keepalive":
+//            print("[EventSub] [keepalive]")
             // Таймер уже сброшен выше в listenEventSubMessages
 
         case "notification":
+//            print("[EventSub] [notification]: \(env)")
             handleNotification(subType: subType, text: text)
 
         default:
@@ -417,7 +450,7 @@ extension TwitchChatManager {
     private func handleNotification(subType: String?, text: String) {
         let jsonAny: Any? = text.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }
 
-        if subType == "channel.channel_points_custom_reward_redemption.add" {
+        if subType != "channel.chat.message" {
             let messageIdStr = jsonAny.flatMap { findStringValue(forKey: "message_id", in: $0) }
             let userNameStr = jsonAny.flatMap { findStringValue(forKey: "user_name", in: $0) }
             let titleStr = jsonAny.flatMap { findStringValue(forKey: "title", in: $0) }

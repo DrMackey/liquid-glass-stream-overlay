@@ -149,12 +149,12 @@ struct ContentView: View {
             // MARK: 2. Верхний UI — чат и т.п. (уходит вверх при показе Glass Bar)
             GeometryReader { geometry in
                 VStack(spacing: 0) {
-                    ZStack(alignment: .top) {
+                    ZStack(alignment: .topTrailing) {
                         HStack {
-                            Spacer().frame(maxWidth: 480, maxHeight: .infinity)
+//                            Spacer().frame(maxWidth: 480, maxHeight: .infinity)
                             VStack {
                                 if let message = chat.lastMessage {
-                                    let maxMessageWidth = 480
+                                    let maxMessageWidth = 900
                                     let displayMessage = chat.makeDisplayMessage(message, maxWidth: CGFloat(maxMessageWidth), badgeUrlMap: chat.allBadgeImages)
                                     
                                     MessageTextView(
@@ -174,17 +174,17 @@ struct ContentView: View {
                                 Spacer()
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                            GlassBarLabel(
-                                chat: chat,
-                                isNotifictaion: true, insertionTransition: .move(edge: .trailing),
-                                removalTransition: .move(edge: .trailing).combined(with: .offset(x: 15))
-                            )
-                                .frame(maxWidth: 480, maxHeight: .infinity, alignment: .topLeading)
-                                .padding()
                         }
                         
+                        GlassBarLabel(
+                            chat: chat,
+                            isNotification: true, insertionTransition: .move(edge: .trailing),
+                            removalTransition: .move(edge: .trailing).combined(with: .offset(x: 15))
+                        )
+                            .frame(maxWidth: 480, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding()
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
                 .offset(y: showGlassEffectBar ? -geometry.size.height * 1.1 : 0)
                 .animation(

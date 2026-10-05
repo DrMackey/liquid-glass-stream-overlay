@@ -26,7 +26,7 @@ struct GlassBarContainer: View {
                             .frame(maxHeight: .infinity)
                         
                         VStack {
-                            GlassBarLabel(chat: chat, isNotifictaion: false)
+                            GlassBarLabel(chat: chat, isNotification: false)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -1,0 +1,6 @@
+schemaVersion: 1
+sessionDefaults:
+  workspacePath: './New Test App.xcworkspace'
+  scheme: 'New Test App'
+  configuration: 'Debug'
+  platform: 'iOS'

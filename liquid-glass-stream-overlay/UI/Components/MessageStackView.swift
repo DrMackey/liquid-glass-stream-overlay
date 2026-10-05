@@ -8,6 +8,7 @@ struct MessageStackView: View {
     let availableHeight: CGFloat
     let maxWidth: CGFloat
     let chat: TwitchChatManager
+    let isNotification: Bool
 
     enum CascadeStyle {
         case cascade2
@@ -74,6 +75,7 @@ struct MessageStackView: View {
                         ),
                         maxWidth: maxWidth,
                         totalCount: messageItems.count,
+                        isNotification: isNotification
                     )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -88,6 +90,7 @@ struct MessageStackView: View {
                     ),
                     maxWidth: maxWidth,
                     totalCount: messageItems.count,
+                    isNotification: isNotification
                 )
                 .transition(.scale.combined(with: .opacity))
                 .frame(maxWidth: .infinity, maxHeight: availableHeight, alignment: .bottom)
