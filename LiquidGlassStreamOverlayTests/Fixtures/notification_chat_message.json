@@ -1,0 +1,104 @@
+{
+    "metadata": {
+        "message_id": "5c1a2b3d-4e5f-6789-abcd-ef0123456789",
+        "message_type": "notification",
+        "message_timestamp": "2024-03-15T12:00:00.000000000Z",
+        "subscription_type": "channel.chat.message",
+        "subscription_version": "1"
+    },
+    "payload": {
+        "subscription": {
+            "id": "a1b2c3d4-5e6f-7890-abcd-ef0123456789",
+            "status": "enabled",
+            "type": "channel.chat.message",
+            "version": "1",
+            "cost": 0,
+            "condition": {
+                "broadcaster_user_id": "12826",
+                "user_id": "12826"
+            },
+            "transport": {
+                "method": "websocket",
+                "session_id": "AQoQexAWVYKSTIu4ec_2VAxyuhAB"
+            },
+            "created_at": "2024-03-15T11:00:00.000000000Z"
+        },
+        "event": {
+            "message_id": "cc106a89",
+            "broadcaster_user_id": "12826",
+            "broadcaster_user_name": "Twitch",
+            "broadcaster_user_login": "twitch",
+            "chatter_user_id": "141981764",
+            "chatter_user_name": "Streamer",
+            "chatter_user_login": "streamer",
+            "message": {
+                "text": "hey chat! KappaLove",
+                "fragments": [
+                    {
+                        "type": "text",
+                        "text": "hey chat! "
+                    },
+                    {
+                        "type": "emote",
+                        "text": "KappaLove",
+                        "emote": {
+                            "id": "25",
+                            "name": "KappaLove",
+                            "emote_set_id": "300658269",
+                            "owner_id": "119418775",
+                            "format": [
+                                "static"
+                            ],
+                            "scale": [
+                                "1.0",
+                                "2.0",
+                                "3.0"
+                            ],
+                            "theme_mode": [
+                                "light",
+                                "dark"
+                            ]
+                        }
+                    }
+                ]
+            },
+            "color": "#00FF7F",
+            "badges": [
+                {
+                    "set_id": "subscriber",
+                    "id": "1"
+                },
+                {
+                    "set_id": "moderator",
+                    "id": "1"
+                }
+            ],
+            "message_type": "text",
+            "cheer": {
+                "bits": 100
+            },
+            "reward": {
+                "reward_id": "92af127c-7326-4483-a52c-33b2c6d64f06",
+                "title": "Wow",
+                "cost": 100,
+                "prompt": ""
+            },
+            "source_badge_info": {
+                "subscriber": {
+                    "sub_tier": "1"
+                }
+            },
+            "source_badges": [
+                {
+                    "set_id": "subscriber",
+                    "id": "12"
+                }
+            ],
+            "source_message_id": "cc106a89",
+            "source_user_id": "141981764",
+            "source_user_login": "streamer",
+            "source_user_name": "Streamer",
+            "source_message_type": "text"
+        }
+    }
+}

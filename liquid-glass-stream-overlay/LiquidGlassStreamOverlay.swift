@@ -1,11 +1,17 @@
 import SwiftUI
 import AppKit
 
-class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        // Additional setup after launch can go here
-    }
-}
+/// Делегат приложения. Все методы `NSApplicationDelegate` необязательные,
+/// поэтому пустой класс полностью допустим и сохраняет место для будущей
+/// настройки после запуска.
+///
+/// Метод `applicationDidFinishLaunching(_:)` здесь намеренно не объявляется:
+/// в текущем SDK он не сопоставляется ни с одной комбинацией аннотаций
+/// (`@MainActor`, `nonisolated`, `@objc` — последнее вообще не компилируется
+/// для параметра `Notification`) и даёт предупреждение «nearly matches optional
+/// requirement». Объявлять его вручную не имеет смысла: пустой метод ничего
+/// не делал.
+class AppDelegate: NSObject, NSApplicationDelegate {}
 
 @main
 struct NewTestApp: App {

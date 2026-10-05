@@ -150,25 +150,25 @@ final class TwitchChatManager: ObservableObject {
     private var streamInfoTask: Task<Void, Never>?
 
     // MARK: - EventSub (WebSocket)
-    private var eventSubWebSocketTask: URLSessionWebSocketTask?
     private var eventSubSessionId: String?
-//    private let eventSubURL = URL(string: "wss://eventsub.wss.twitch.tv/ws")!
+    private var eventSubSocket: EventSubSocketClient?
+    private var eventSubConsumerTask: Task<Void, Never>?
     private let eventSubURL = URL(string: "ws://127.0.0.1:8080/ws")!
-    private let urlSession = URLSession(configuration: .default)
-
-    /// Счётчик и задержка для exponential backoff при переподключении
-    private var reconnectAttempt: Int = 0
-    private var reconnectTask: Task<Void, Never>?
-
-    /// Таймер для отслеживания keepalive — если Twitch не присылает keepalive/уведомление, переподключаемся
-    private var keepaliveTimer: Timer?
 
     // MARK: - Init
     init() {
         streamInfoTask = Task { [weak self] in
             await self?.runStreamInfoLoop()
         }
-        startEventSubWebSocket()
+        let socket = EventSubSocketClient(
+            url: eventSubURL,
+            keepaliveTimeout: Constants.keepaliveTimeout,
+            maxReconnectDelay: Constants.maxReconnectDelay,
+            onStateChange: { [weak self] event in self?.handleStateChange(event) }
+        )
+        eventSubSocket = socket
+        consumeEventSubEvents(from: socket)
+        socket.start()
         setupNotificationsAutoClear(
                     notificationDisplayTime: 5,
                     manager: self,
@@ -178,12 +178,11 @@ final class TwitchChatManager: ObservableObject {
     
     // MARK: - Stop
     func stop() {
-        print("[TwitchChat] stop()")
-        cancelKeepaliveTimer()
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        eventSubWebSocketTask?.cancel(with: .goingAway, reason: nil)
-        eventSubWebSocketTask = nil
+        EventSubLog.info("stop()")
+        eventSubConsumerTask?.cancel()
+        eventSubConsumerTask = nil
+        eventSubSocket?.stop()
+        eventSubSocket = nil
         streamInfoTask?.cancel()
         streamInfoTask = nil
     }
@@ -202,18 +201,7 @@ final class TwitchChatManager: ObservableObject {
         }
     }
 
-    // MARK: - Добавление сообщения в UI
-    private func setLastMessageThrottled(_ message: Message) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.lastMessage = message
-            self.messages.append(message)
-            if self.messages.count > Constants.maxMessages {
-                self.messages.removeFirst(self.messages.count - Constants.maxMessages)
-            }
-        }
-    }
-
+    // MARK: - Загрузка эмоутов
     func loadGlobalEmotes() async {
         // Все источники загружаем параллельно
         async let stv: Void = load7TVEmotes(manager: self)
@@ -231,7 +219,7 @@ final class TwitchChatManager: ObservableObject {
             targetUserId = (try? await TwitchChatManager.sharedChannelId(login: TWITCH_CHANNEL)) ?? ""
         }
         guard !targetUserId.isEmpty else {
-            print("[EventSub] Не удалось определить user_id для подписки")
+            EventSubLog.info("Не удалось определить user_id для подписки")
             return
         }
         
@@ -274,7 +262,7 @@ final class TwitchChatManager: ObservableObject {
                 decoded.data?.compactMap { $0.type }.forEach { activeTypes.insert($0) }
             }
         } catch {
-            print("[EventSub] GET subscriptions error: \(error)")
+            EventSubLog.info("GET subscriptions error: \(error)")
         }
 
         // Подписываемся на недостающие типы
@@ -288,10 +276,10 @@ final class TwitchChatManager: ObservableObject {
                 req.httpBody = try buildEventSubSubscriptionBody(sessionId: sessionId, userId: targetUserId, overrideType: t)
                 let (_, resp) = try await URLSession.shared.data(for: req)
                 if let http = resp as? HTTPURLResponse {
-                    print("[EventSub] subscribe status for type=\(t): \(http.statusCode)")
+                    EventSubLog.debug("subscribe status for type=\(t): \(http.statusCode)")
                 }
             } catch {
-                print("[EventSub] subscribe error for type=\(t): \(error)")
+                EventSubLog.info("subscribe error for type=\(t): \(error)")
             }
         }
     }
@@ -300,247 +288,118 @@ final class TwitchChatManager: ObservableObject {
 // MARK: - EventSub WebSocket
 extension TwitchChatManager {
 
-    private func findStringValue(forKey targetKey: String, in json: Any) -> String? {
-        if let dict = json as? [String: Any] {
-            for (key, value) in dict {
-                if key == targetKey {
-                    if let str = value as? String { return str }
-                    if let num = value as? NSNumber { return num.stringValue }
-                }
-                if let found = findStringValue(forKey: targetKey, in: value) { return found }
+    // MARK: - Обработка событий транспорта
+    /// Переводит события жизненного цикла соединения в состояние UI.
+    private func handleStateChange(_ event: EventSubSocketClient.StateEvent) {
+        switch event {
+        case .connecting(let attempt):
+            EventSubLog.debug("Подключаемся (попытка \(attempt))…")
+            DispatchQueue.main.async { self.isConnected = "Подключение…" }
+
+        case .connected:
+            DispatchQueue.main.async { self.isConnected = "Подключено" }
+
+        case .reconnectingIn(let seconds, let attempt):
+            if seconds == 0 {
+                DispatchQueue.main.async { self.isConnected = "Переподключение…" }
+            } else {
+                DispatchQueue.main.async { self.isConnected = "Переподключение через \(seconds)с…" }
             }
-        } else if let array = json as? [Any] {
-            for item in array {
-                if let found = findStringValue(forKey: targetKey, in: item) { return found }
-            }
+            EventSubLog.debug("Переподключение: попытка \(attempt), задержка \(seconds)с")
+
+        case .failed(let error):
+            DispatchQueue.main.async { self.isConnected = "Ошибка соединения" }
+            EventSubLog.debug("Ошибка соединения: \(error)")
+
+        case .stopped:
+            EventSubLog.debug("Сокет остановлен")
         }
-        return nil
     }
 
-    // MARK: - Запуск WebSocket
-    func startEventSubWebSocket() {
-        // Отменяем отложенное переподключение, если оно есть
-        reconnectTask?.cancel()
-        reconnectTask = nil
-
-        // Не дублируем активное соединение
-        if let task = eventSubWebSocketTask {
-            switch task.state {
-            case .running, .suspended: return
-            default: break
-            }
-        }
-
-        print("[EventSub] Подключаемся (попытка \(reconnectAttempt + 1))…")
-        DispatchQueue.main.async { self.isConnected = "Подключение…" }
-
-        let task = urlSession.webSocketTask(with: eventSubURL)
-        eventSubWebSocketTask = task
-        task.resume()
-        resetKeepaliveTimer()
-        listenEventSubMessages()
-    }
-
-    // MARK: - Keepalive таймер
-    /// Сбрасывает таймер. Если за константу Constants.keepaliveTimeout + 5с не придёт ни одного сообщения — переподключаемся.
-    private func resetKeepaliveTimer() {
-        cancelKeepaliveTimer()
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.keepaliveTimer = Timer.scheduledTimer(
-                withTimeInterval: Constants.keepaliveTimeout + 5,
-                repeats: false
-            ) { [weak self] _ in
-                guard let self = self else { return }
-                print("[EventSub] Keepalive timeout — переподключаемся")
-                self.scheduleReconnect()
+    // MARK: - Поток событий EventSub
+    /// Единственное место, где менеджер читает события сокета.
+    ///
+    /// Таск наследует изоляцию главного актора, поэтому `apply` меняет
+    /// `@Published`-свойства без гонок и без хопов через `DispatchQueue`.
+    private func consumeEventSubEvents(from socket: EventSubSocketClient) {
+        eventSubConsumerTask?.cancel()
+        eventSubConsumerTask = Task { [weak self] in
+            for await event in socket.events {
+                guard let self else { return }
+                self.apply(EventSubRouter.actions(for: event))
             }
         }
     }
 
-    private func cancelKeepaliveTimer() {
-        DispatchQueue.main.async { [weak self] in
-            self?.keepaliveTimer?.invalidate()
-            self?.keepaliveTimer = nil
-        }
-    }
+    /// Применяет намерения роутера. Новый случай действия заставит компилятор
+    /// спросить, что с ним делать, — это защита от молчаливых потерь событий.
+    private func apply(_ actions: [EventSubRouter.Action]) {
+        for action in actions {
+            switch action {
+            case .subscribe(let sessionId):
+                eventSubSessionId = sessionId
+                // Успешное подключение — сбрасываем счётчик попыток
+                eventSubSocket?.resetReconnectBackoff()
+                EventSubLog.debug("session_welcome: session_id=\(sessionId)")
+                Task { await self.subscribeToEventSub(sessionId: sessionId) }
 
-    // MARK: - Чтение сообщений
-    private func listenEventSubMessages() {
-        eventSubWebSocketTask?.receive { [weak self] result in
-            guard let self = self else { return }
-            switch result {
-            case .failure(let error):
-                print("[EventSub] receive error: \(error)")
-                DispatchQueue.main.async { self.isConnected = "Ошибка соединения" }
-                self.scheduleReconnect()
+            case .reconnect:
+                // Twitch просит переподключиться к новому URL
+                requestImmediateReconnect()
 
-            case .success(let message):
-                // Любое входящее сообщение сбрасывает таймер keepalive
-                self.resetKeepaliveTimer()
-                DispatchQueue.main.async { self.isConnected = "Подключено" }
+            case .chat(let chat):
+                let badgePairs = chat.badgePairs
+                appendChatMessage(Message(
+                    sender: chat.chatterUserName,
+                    text: chat.text,
+                    badges: badgePairs,
+                    senderColor: chat.colorHex.flatMap { colorFromHex($0) },
+                    badgeViewData: badgeViews(from: badgePairs, badgeUrlMap: allBadgeImages)))
 
-                switch message {
-                case .string(let text):
-                    self.handleEventSubJSONString(text)
-                case .data(let data):
-                    if let text = String(data: data, encoding: .utf8) {
-                        self.handleEventSubJSONString(text)
-                    }
-                @unknown default:
-                    break
-                }
-                // Продолжаем слушать только если соединение активно
-                if let task = self.eventSubWebSocketTask, task.state == .running {
-                    self.listenEventSubMessages()
-                }
+            case .notice(let event):
+                appendNotice(event)
+
+            case .revoke(let subscriptionType):
+                EventSubLog.info("Подписка \(subscriptionType) отозвана")
             }
         }
     }
 
-    // MARK: - Обработка JSON сообщений EventSub
-    private func handleEventSubJSONString(_ text: String) {
+    /// Сообщение чата: пустые цвета и неизвестные бейджи отсеиваются декодером.
+    private func appendChatMessage(_ message: Message) {
+        lastMessage = message
+        messages.append(message)
+        trimMessages()
+    }
 
-        struct Envelope: Decodable {
-            struct Metadata: Decodable { let message_type: String; let subscription_type: String? }
-            struct Payload: Decodable {
-                struct Session: Decodable { let id: String?; let reconnect_url: String? }
-                let session: Session?
-            }
-            let metadata: Metadata
-            let payload: Payload?
-        }
+    /// Событие прочей подписки: и в список сообщений, и в баннер уведомлений.
+    private func appendNotice(_ event: EventSubNotice) {
+        let id = event.messageId.flatMap { UUID(uuidString: $0) } ?? UUID()
+        let sender = event.userName ?? "eventsub"
+        // Заголовка может не быть (например, у `channel.subscription.gift`).
+        // Раньше fallback'ом служил сырой JSON, но типизированная модель его не
+        // хранит, поэтому показываем тип подписки — он информативнее.
+        let body = event.title.flatMap { $0.isEmpty ? nil : $0 } ?? event.subscriptionType
+        let text = "Получена награда — \(body)"
+        let badgeViewData = badgeViews(from: [], badgeUrlMap: allBadgeImages)
 
-        guard let data = text.data(using: .utf8),
-              let env = try? JSONDecoder().decode(Envelope.self, from: data) else { return }
+        notifications.append(Notification(id: id, sender: sender, text: text,
+                                          badges: [], senderColor: .gray, badgeViewData: badgeViewData))
+        messages.append(Message(id: UUID(), sender: sender, text: text,
+                                badges: [], senderColor: .gray, badgeViewData: badgeViewData))
+        trimMessages()
+    }
 
-        let type = env.metadata.message_type
-        let subType = env.metadata.subscription_type
-        
-        print("[EventSub] [\(subType)] <- \(text)")
-
-        switch type {
-        case "session_welcome":
-            if let id = env.payload?.session?.id {
-                eventSubSessionId = id
-                reconnectAttempt = 0  // Успешное подключение — сбрасываем счётчик
-//                print("[EventSub] [session_welcome]. session_id=\(id)")
-                Task { await self.subscribeToEventSub(sessionId: id) }
-            }
-
-        case "session_reconnect":
-            // Twitch просит переподключиться к новому URL
-//            print("[EventSub] [session_reconnect] — переподключаемся")
-            DispatchQueue.main.async { self.isConnected = "Переподключение…" }
-            scheduleReconnect(immediately: true)
-
-//        case "session_keepalive":
-//            print("[EventSub] [keepalive]")
-            // Таймер уже сброшен выше в listenEventSubMessages
-
-        case "notification":
-//            print("[EventSub] [notification]: \(env)")
-            handleNotification(subType: subType, text: text)
-
-        default:
-            break
+    private func trimMessages() {
+        if messages.count > Constants.maxMessages {
+            messages.removeFirst(messages.count - Constants.maxMessages)
         }
     }
 
-    private func handleNotification(subType: String?, text: String) {
-        let jsonAny: Any? = text.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }
-
-        if subType != "channel.chat.message" {
-            let messageIdStr = jsonAny.flatMap { findStringValue(forKey: "message_id", in: $0) }
-            let userNameStr = jsonAny.flatMap { findStringValue(forKey: "user_name", in: $0) }
-            let titleStr = jsonAny.flatMap { findStringValue(forKey: "title", in: $0) }
-
-            let computedId = messageIdStr.flatMap { UUID(uuidString: $0) } ?? UUID()
-            let sender = userNameStr ?? "eventsub"
-            let baseText = titleStr.flatMap { $0.isEmpty ? nil : $0 } ?? String(text.prefix(120))
-            let messageText = "Получена награда — \(baseText)"
-            let badgeData = badgeViews(from: [], badgeUrlMap: allBadgeImages)
-
-            let notif = Notification(id: computedId, sender: sender, text: messageText,
-                                     badges: [], senderColor: .gray, badgeViewData: badgeData)
-            let msg = Message(id: UUID(), sender: sender, text: messageText,
-                              badges: [], senderColor: .gray, badgeViewData: badgeData)
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.notifications.append(notif)
-                self.messages.append(msg)
-                if self.messages.count > Constants.maxMessages {
-                    self.messages.removeFirst(self.messages.count - Constants.maxMessages)
-                }
-            }
-
-        } else if subType == "channel.chat.message" {
-            guard let jsonDict = jsonAny as? [String: Any],
-                  let payload = jsonDict["payload"] as? [String: Any],
-                  let event = payload["event"] as? [String: Any],
-                  let senderShown = event["chatter_user_name"] as? String,
-                  let messageDict = event["message"] as? [String: Any],
-                  let msgText = messageDict["text"] as? String else {
-                print("[EventSub] Не удалось извлечь данные chat.message")
-                return
-            }
-
-            let senderColorHex = event["color"] as? String
-            let color: Color? = (senderColorHex?.isEmpty == false) ? colorFromHex(senderColorHex!) : nil
-            let badges = event["badges"] as? [[String: Any]] ?? []
-            let badgePairs: [(String, String)] = badges.compactMap { dict in
-                guard let set = dict["set_id"] as? String, let version = dict["id"] as? String else { return nil }
-                return (set, version)
-            }
-
-            let badgeViewData = badgeViews(from: badgePairs, badgeUrlMap: allBadgeImages)
-            setLastMessageThrottled(Message(sender: senderShown, text: msgText,
-                                            badges: badgePairs, senderColor: color, badgeViewData: badgeViewData))
-        }
+    private func requestImmediateReconnect() {
+        eventSubSocket?.scheduleReconnect(immediately: true)
     }
 
-    // MARK: - Переподключение с exponential backoff
-    /// Планирует переподключение с нарастающей задержкой.
-    private func scheduleReconnect(immediately: Bool = false) {
-        cancelKeepaliveTimer()
-        eventSubWebSocketTask?.cancel(with: .goingAway, reason: nil)
-        eventSubWebSocketTask = nil
-
-        reconnectTask?.cancel()
-
-        let delay: TimeInterval
-        if immediately {
-            delay = 0
-        } else {
-            // Exponential backoff: 1, 2, 4, 8, 16, 32, 60 секунд
-            delay = min(pow(2.0, Double(reconnectAttempt)), Constants.maxReconnectDelay)
-            reconnectAttempt += 1
-            print("[EventSub] Следующая попытка через \(Int(delay))с (попытка \(reconnectAttempt))")
-        }
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            if delay > 0 { self.isConnected = "Переподключение через \(Int(delay))с…" }
-        }
-
-        reconnectTask = Task { [weak self] in
-            if delay > 0 {
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            }
-            guard !Task.isCancelled else { return }
-            self?.startEventSubWebSocket()
-        }
-    }
-
-    private func sendEventSubPong() {
-        eventSubWebSocketTask?.sendPing { error in
-            if let error { print("[EventSub] ping/pong send error: \(error)") }
-        }
-    }
-
-    private func reconnectEventSub() {
-        scheduleReconnect()
-    }
 
     // MARK: - Билдер тела подписки
     private func buildEventSubSubscriptionBody(sessionId: String, userId: String) throws -> Data {

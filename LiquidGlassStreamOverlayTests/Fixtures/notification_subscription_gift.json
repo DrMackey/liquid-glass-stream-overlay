@@ -1,0 +1,39 @@
+{
+    "metadata": {
+        "message_id": "3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f",
+        "message_type": "notification",
+        "message_timestamp": "2024-03-15T12:10:00.000000000Z",
+        "subscription_type": "channel.subscription.gift",
+        "subscription_version": "1"
+    },
+    "payload": {
+        "subscription": {
+            "id": "c3d4e5f6-7a8b-9c0d-1e2f-3a4b5c6d7e8f",
+            "status": "enabled",
+            "type": "channel.subscription.gift",
+            "version": "1",
+            "cost": 0,
+            "condition": {
+                "broadcaster_user_id": "12826"
+            },
+            "transport": {
+                "method": "websocket",
+                "session_id": "AQoQexAWVYKSTIu4ec_2VAxyuhAB"
+            },
+            "created_at": "2024-03-15T11:00:00.000000000Z"
+        },
+        "event": {
+            "id": "d4e5f6a7-8b9c-0d1e-2f3a-4b5c6d7e8f9a",
+            "broadcaster_user_id": "12826",
+            "broadcaster_user_login": "twitch",
+            "broadcaster_user_name": "Twitch",
+            "total": 5,
+            "tier": "1",
+            "cumulative_total": 25,
+            "is_anonymous": false,
+            "user_id": "9002",
+            "user_login": "generous_gifter",
+            "user_name": "Generous_Gifter"
+        }
+    }
+}

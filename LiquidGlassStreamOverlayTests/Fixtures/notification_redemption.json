@@ -1,0 +1,49 @@
+{
+    "metadata": {
+        "message_id": "7e8f9a0b-1c2d-3e4f-5a6b-7c8d9e0f1a2b",
+        "message_type": "notification",
+        "message_timestamp": "2024-03-15T12:05:00.000000000Z",
+        "subscription_type": "channel.channel_points_custom_reward_redemption.add",
+        "subscription_version": "1"
+    },
+    "payload": {
+        "subscription": {
+            "id": "b2c3d4e5-6f7a-8901-b2c3-d4e5f6a78901",
+            "status": "enabled",
+            "type": "channel.channel_points_custom_reward_redemption.add",
+            "version": "1",
+            "cost": 0,
+            "condition": {
+                "broadcaster_user_id": "12826"
+            },
+            "transport": {
+                "method": "websocket",
+                "session_id": "AQoQexAWVYKSTIu4ec_2VAxyuhAB"
+            },
+            "created_at": "2024-03-15T11:00:00.000000000Z"
+        },
+        "event": {
+            "id": "17fa2df1-ad76-4804-bfa5-a40ef63ede63",
+            "broadcaster_user_id": "12826",
+            "broadcaster_user_login": "twitch",
+            "broadcaster_user_name": "Twitch",
+            "user_id": "9001",
+            "user_login": "cool_viewer",
+            "user_name": "Cool_Viewer",
+            "user_input": "Отличный стрим!",
+            "status": "unfulfilled",
+            "redeemed_at": "2024-03-15T12:05:00.000000000Z",
+            "reward": {
+                "id": "92af127c-7326-4483-a52c-33b2c6d64f06",
+                "title": "Обед в студии",
+                "cost": 500,
+                "prompt": "Напишите свой вариант"
+            },
+            "channel_points": {
+                "earned": 4500,
+                "spent": 500,
+                "total": 5000
+            }
+        }
+    }
+}
