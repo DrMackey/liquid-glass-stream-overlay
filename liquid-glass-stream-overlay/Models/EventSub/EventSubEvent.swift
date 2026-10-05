@@ -47,12 +47,12 @@ nonisolated enum EventSubEvent: Decodable, Sendable {
         let session: Session?
     }
 
-    private enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey {
         case metadata
         case payload
     }
 
-    private enum PayloadKeys: String, CodingKey {
+    enum PayloadKeys: String, CodingKey {
         case event
     }
 
@@ -79,20 +79,12 @@ nonisolated enum EventSubEvent: Decodable, Sendable {
             self = .sessionReconnect(reconnectURL: payload.session?.reconnect_url)
 
         case "notification":
-            let subscriptionType = metadata.subscription_type ?? ""
-            let payload = try container.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
-
-            if subscriptionType == "channel.chat.message" {
-                let chat = try payload.decode(ChatMessageEvent.self, forKey: .event)
-                self = .notification(payload: .chat(chat))
-            } else {
-                let generic = try payload.decode(GenericNotificationEvent.self, forKey: .event)
-                self = .notification(
-                    payload: .generic(
-                        generic.with(subscriptionType: subscriptionType, messageId: metadata.message_id)
-                    )
-                )
-            }
+            let kind = SubscriptionKind.parse(metadata.subscription_type ?? "")
+            self = .notification(payload: try EventSubNotificationDecoder.decode(
+                kind: kind,
+                messageId: metadata.message_id,
+                from: container
+            ))
 
         case "revocation":
             self = .revocation(subscriptionType: metadata.subscription_type ?? "")
@@ -105,17 +97,20 @@ nonisolated enum EventSubEvent: Decodable, Sendable {
 
 // MARK: - Payload нотификации
 
-/// Payload события подписки: либо полностью типизированный `channel.chat.message`,
-/// либо общий набор полей для остальных подписок.
-nonisolated enum EventSubNotificationPayload: Sendable {
+/// Payload события подписки.
+nonisolated enum EventSubNotificationPayload: Sendable, Equatable {
+    /// `channel.chat.message` — горячий путь, отдельная модель и отдельный маршрут.
     case chat(ChatMessageEvent)
-    case generic(GenericNotificationEvent)
+    /// Любая другая подписка, разобранная в её собственную модель.
+    case event(EventSubNotice)
+    /// Тип подписки неизвестен приложению: событие игнорируется, но не считается ошибкой.
+    case unsupported(subscriptionType: String)
 }
 
 // MARK: - События
 
 /// Сообщение чата — горячий путь, декодируется полностью типизированно.
-nonisolated struct ChatMessageEvent: Decodable, Sendable {
+nonisolated struct ChatMessageEvent: Decodable, Sendable, Equatable {
 
     /// Бейдж чата. Набор и порядок приходят от Twitch.
     struct Badge: Decodable, Equatable, Sendable {
@@ -158,54 +153,5 @@ nonisolated struct ChatMessageEvent: Decodable, Sendable {
         text = try container.decode(Message.self, forKey: .message).text
         badges = (try? container.decode([Badge].self, forKey: .badges)) ?? []
         rawColorHex = try? container.decodeIfPresent(String.self, forKey: .color)
-    }
-}
-
-/// Общий вид события для подписок без специализированной разметки.
-nonisolated struct GenericNotificationEvent: Decodable, Sendable {
-
-    /// Награда за баллы канала: её заголовок используется как текст награды.
-    private struct Reward: Decodable {
-        let title: String?
-    }
-
-    let subscriptionType: String
-    /// `metadata.message_id` — идентификатор сообщения, а не события.
-    let messageId: String?
-    /// `payload.event.user_name` — имя пользователя, совершившего действие.
-    let userName: String?
-    /// `payload.event.title` либо заголовок награды `payload.event.reward.title`.
-    let title: String?
-
-    enum CodingKeys: String, CodingKey {
-        case user_name
-        case title
-        case reward
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        subscriptionType = ""
-        messageId = nil
-        userName = try container.decodeIfPresent(String.self, forKey: .user_name)
-        let rewardTitle = try container.decodeIfPresent(Reward.self, forKey: .reward)?.title
-        title = try container.decodeIfPresent(String.self, forKey: .title) ?? rewardTitle
-    }
-
-    private init(subscriptionType: String, messageId: String?, userName: String?, title: String?) {
-        self.subscriptionType = subscriptionType
-        self.messageId = messageId
-        self.userName = userName
-        self.title = title
-    }
-
-    /// Дополняет событие данными из `metadata`, которые лежат вне payload'а.
-    func with(subscriptionType: String, messageId: String?) -> GenericNotificationEvent {
-        GenericNotificationEvent(
-            subscriptionType: subscriptionType,
-            messageId: messageId,
-            userName: userName,
-            title: title
-        )
     }
 }

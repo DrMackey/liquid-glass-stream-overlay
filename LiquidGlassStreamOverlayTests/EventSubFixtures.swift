@@ -3,6 +3,8 @@
 
 import Foundation
 
+@testable import Liquid_Glass_Stream_Overlay
+
 /// Маркер для получения bundle'а тестового таргета.
 private final class BundleToken {}
 
@@ -30,6 +32,11 @@ enum EventSubFixtures {
     /// Загружает фикстуру как строку.
     static func string(named name: String) throws -> String {
         String(decoding: try data(named: name), as: UTF8.self)
+    }
+
+    /// Загружает фикстуру и разбирает её одним проходом в `EventSubEvent`.
+    static func event(named name: String) throws -> EventSubEvent {
+        try JSONDecoder().decode(EventSubEvent.self, from: try data(named: name))
     }
 
     enum FixtureError: Error, CustomStringConvertible {

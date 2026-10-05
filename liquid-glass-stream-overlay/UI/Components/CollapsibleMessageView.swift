@@ -212,9 +212,9 @@ struct CollapsibleMessageView: View {
                 // Если текущий и следующий элементы — слова, не добавляем межэлементный отступ, пробел уже входит в токен
                 let currentIsWord: Bool
                 let nextIsWord: Bool
-                switch (current as! FlowItem).kind { case .word: currentIsWord = true; default: currentIsWord = false }
+                switch current.kind { case .word: currentIsWord = true; default: currentIsWord = false }
                 if let next = next {
-                    switch (next as! FlowItem).kind { case .word: nextIsWord = true; default: nextIsWord = false }
+                    switch next.kind { case .word: nextIsWord = true; default: nextIsWord = false }
                 } else { nextIsWord = false }
                 return (currentIsWord && nextIsWord) ? 0 : 6
             }) { item in

@@ -117,76 +117,78 @@ struct EventSubEventTests {
     // MARK: - Остальные подписки
 
     @Test("follow достаёт user_name и message_id из metadata")
-    func followDecodesGeneric() throws {
+    func followDecodesNotice() throws {
         let event = try EventSubFixtures.event(named: "notification_follow")
 
-        guard case .notification(let payload) = event, case .generic(let generic) = payload else {
-            Issue.record("Ожидался generic payload, получено \(event)")
+        guard case .notification(let payload) = event, case .event(let notice) = payload else {
+            Issue.record("Ожидался event payload, получено \(event)")
             return
         }
-        #expect(generic.subscriptionType == "channel.follow")
-        #expect(generic.userName == "Awesome_User")
-        #expect(generic.messageId == "befa7b53-d79d-478f-86b9-120f112b044e")
-        #expect(generic.title == nil)
+        #expect(notice.kind == .follow)
+        #expect(notice.subscriptionType == "channel.follow")
+        #expect(notice.userName == "Awesome_User")
+        #expect(notice.messageId == "befa7b53-d79d-478f-86b9-120f112b044e")
+        #expect(notice.title == nil)
     }
 
     @Test("redemption берёт title из reward")
     func redemptionTakesRewardTitle() throws {
         let event = try EventSubFixtures.event(named: "notification_redemption")
 
-        guard case .notification(let payload) = event, case .generic(let generic) = payload else {
-            Issue.record("Ожидался generic payload, получено \(event)")
+        guard case .notification(let payload) = event, case .event(let notice) = payload else {
+            Issue.record("Ожидался event payload, получено \(event)")
             return
         }
-        #expect(generic.title == "Обед в студии")
-        #expect(generic.userName == "Cool_Viewer")
+        #expect(notice.kind == .channelPointsRewardRedemption)
+        #expect(notice.title == "Обед в студии")
+        #expect(notice.userName == "Cool_Viewer")
     }
 
     @Test("subscription.gift без title даёт nil, а не пустую строку")
     func giftWithoutTitleYieldsNil() throws {
         let event = try EventSubFixtures.event(named: "notification_subscription_gift")
 
-        guard case .notification(let payload) = event, case .generic(let generic) = payload else {
-            Issue.record("Ожидался generic payload, получено \(event)")
+        guard case .notification(let payload) = event, case .event(let notice) = payload else {
+            Issue.record("Ожидался event payload, получено \(event)")
             return
         }
-        #expect(generic.title == nil)
-        #expect(generic.userName == "Generous_Gifter")
+        #expect(notice.kind == .subscriptionGift)
+        #expect(notice.title == nil)
+        #expect(notice.userName == "Generous_Gifter")
     }
 
     @Test("Пустой title трактуется как отсутствие заголовка")
     func emptyTitleYieldsRawFallback() throws {
-        let event = try decodeRawGeneric(
+        let event = try decodeNotification(
             subscriptionType: "channel.update",
             overridingEvent: ["title": ""]
         )
         guard case .notification(let payload) = try JSONDecoder().decode(EventSubEvent.self, from: event),
-              case .generic(let generic) = payload else {
-            Issue.record("Ожидался generic payload")
+              case .event(let notice) = payload else {
+            Issue.record("Ожидался event payload")
             return
         }
 
-        #expect(generic.title == "")
-        #expect(generic.subscriptionType == "channel.update")
+        #expect(notice.title == "")
+        #expect(notice.subscriptionType == "channel.update")
     }
 
-    @Test("Отсутствующий subscription_type декодируется как пустая строка")
-    func nilSubscriptionTypeYieldsEmptyString() throws {
+    @Test("Неизвестный subscription_type не превращается в уведомление")
+    func unknownSubscriptionTypeIsUnsupported() throws {
         let json = """
         {
-          "metadata": { "message_type": "notification" },
+          "metadata": { "message_type": "notification", "subscription_type": "channel.something.new" },
           "payload": { "event": { "user_name": "Someone" } }
         }
         """
 
         guard case .notification(let payload) = try JSONDecoder().decode(
             EventSubEvent.self, from: Data(json.utf8)
-        ), case .generic(let generic) = payload else {
-            Issue.record("Ожидался generic payload")
+        ), case .unsupported(let subscriptionType) = payload else {
+            Issue.record("Ожидался unsupported payload")
             return
         }
-        #expect(generic.subscriptionType == "")
-        #expect(generic.userName == "Someone")
+        #expect(subscriptionType == "channel.something.new")
     }
 
     @Test("Все фикстуры декодируются одним проходом")
@@ -284,7 +286,9 @@ struct EventSubEventTests {
         return try JSONSerialization.data(withJSONObject: json)
     }
 
-    private func decodeRawGeneric(subscriptionType: String, overridingEvent overrides: [String: Any?]) throws -> Data {
+    /// Строит уведомление с произвольным payload'ом: ключи в overrides
+    /// заменяются существующие, nil — удаляются.
+    private func decodeNotification(subscriptionType: String, overridingEvent overrides: [String: Any?]) throws -> Data {
         let json = """
         {
           "metadata": {

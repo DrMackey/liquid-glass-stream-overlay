@@ -272,7 +272,7 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.menu)
-            .onChange(of: capture.selectedDeviceID) { _ in
+            .onChange(of: capture.selectedDeviceID, initial: false) { _, _ in
                 capture.startSession()
             }
             Button("Start Camera") {

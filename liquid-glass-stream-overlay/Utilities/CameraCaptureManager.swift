@@ -28,7 +28,7 @@ final class CameraCaptureManager: NSObject, ObservableObject, AVCaptureVideoData
     func updateAvailableDevices() {
         var allDevices: [AVCaptureDevice] = []
         if #available(macOS 10.15, *) {
-            let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .externalUnknown], mediaType: .video, position: .unspecified)
+            let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .external], mediaType: .video, position: .unspecified)
             allDevices = discovery.devices
         } else {
             allDevices = AVCaptureDevice.devices(for: .video)

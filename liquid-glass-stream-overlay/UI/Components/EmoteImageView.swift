@@ -8,7 +8,6 @@ struct EmoteImageView: View {
 
     var body: some View {
         Group {
-            let ext = url.pathExtension.lowercased()
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .empty:

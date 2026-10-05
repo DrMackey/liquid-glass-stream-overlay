@@ -31,7 +31,12 @@ class Config {
 }
 
 //let TWITCH_HELIX_BASE_URL = "https://api.twitch.tv/helix"
-let TWITCH_HELIX_BASE_URL = "http://localhost:8080/mock"
+
+// Константы помечены `nonisolated`: без этого модуль (где по умолчанию
+// действует изоляция главного актора) делает их главноакторными, и любая
+// фоновая задача — `async let`, `Task.detached`, сетевой колбэк — не может
+// к ним обратиться. Это неизменяемые `String`, то есть `Sendable`.
+nonisolated let TWITCH_HELIX_BASE_URL = "http://localhost:8080/mock"
 
 //Авторизационные данные для основы
 //let TWITCH_CHANNEL = Config.shared.TwitchChannel
@@ -39,9 +44,9 @@ let TWITCH_HELIX_BASE_URL = "http://localhost:8080/mock"
 //let TWITCH_HELIX_BEARER_TOKEN = Config.shared.TwitchHelixBearerToken
 
 //Дебаг режим
-let TWITCH_CHANNEL = Config.shared.TwitchChannel
-let TWITCH_HELIX_CLIENT_ID = "xbhqka8dire6qufn4xttrrcylalpil"
-let TWITCH_HELIX_BEARER_TOKEN = "iigl9icsx0kyc973amwr1rb4lyo699"
+nonisolated let TWITCH_CHANNEL = Config.shared.TwitchChannel
+nonisolated let TWITCH_HELIX_CLIENT_ID = "xbhqka8dire6qufn4xttrrcylalpil"
+nonisolated let TWITCH_HELIX_BEARER_TOKEN = "iigl9icsx0kyc973amwr1rb4lyo699"
 
 // MARK: - Модель частей сообщения (текст/эмоут)
 enum MessagePart: Hashable {
@@ -51,6 +56,39 @@ enum MessagePart: Hashable {
 
 // MARK: - Основной менеджер чата Twitch
 final class TwitchChatManager: ObservableObject {
+
+    /// Типы подписок, которые приложение запрашивает у Twitch.
+    ///
+    /// Каждый тип обязан быть известен `SubscriptionKind`: иначе события молча
+    /// придут как `.unsupported` и не появятся в интерфейсе. Соответствие
+    /// проверяется тестом `TwitchChatManagerTests`.
+    ///
+    /// https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/
+    nonisolated static let desiredEventSubTypes: [String] = [
+        "channel.channel_points_custom_reward_redemption.add", // Поддержано | Использование баллов канала
+        "channel.chat.message", // Поддержано | Любой пользователь получает сообщение в чат
+        "channel.chat.clear", // Чат был очищен
+        "channel.chat.clear_user_messages", // Были удалены все сообщения от конкретного пользователя
+        "channel.chat.message_delete", // Конкретное сообщение было удалено
+        "channel.chat.notification", // уведомление при возникновении события в чате, например, при подписке на канал или при получении подарка в виде подписки
+        "channel.follow", // Бесплатная подписка на канал
+        "channel.subscribe", // Платная подписка на канал, без учета повторных подписок
+        "channel.subscription.end", // Окончание подписки на указанный канал
+        "channel.subscription.gift", // Подарочная платная подписка
+        "channel.subscription.message", // Уведомлении при повторной платной подписке
+        "channel.raid", // Рейд на канал
+        "channel.goal.progress", // Прогресс об изменениях в цели
+        "channel.goal.end", // Завершение цели
+        "channel.update", // Обовление данных о трансляции (название, категория)
+        "channel.ban", // Пользователь был заблокирован
+        "channel.unban", // Пользователь был разблокирован
+        "channel.vip.add", // Был добавлен VIP
+        "channel.vip.remove", // VIP Был удален
+        "channel.hype_train.begin", // Старт хайптрейна
+        "channel.hype_train.progress", // Хайптрейн набирает обороты
+        "channel.hype_train.end", // Завершение хайптрейна
+    ]
+
 
     // MARK: - Константы
     enum Constants {
@@ -62,8 +100,12 @@ final class TwitchChatManager: ObservableObject {
     }
 
     // MARK: - Кэш channelId
+    //
+    // Состояние ниже изолировано главным актором: класс помечен `@MainActor`
+    // неявно (SWIFT_DEFAULT_ACTOR_ISOLATION), а критическая секция не содержит
+    // `await`, поэтому прерваться внутри неё нельзя. Отдельная блокировка
+    // не нужна и только мешала компилятору проверять изоляцию.
     private static var cachedChannelId: String? = nil
-    private static var channelIdLock = NSLock()
     private static var channelIdContinuations: [CheckedContinuation<String, Error>] = []
     private static var channelIdFetchInProgress = false
 
@@ -75,10 +117,8 @@ final class TwitchChatManager: ObservableObject {
         if let id = cachedChannelId { return id }
 
         return try await withCheckedThrowingContinuation { continuation in
-            channelIdLock.lock()
-            defer { channelIdLock.unlock() }
-
-            // Повторная проверка под блокировкой
+            // Повторная проверка после `await`: за это время другой вызов
+            // мог уже получить ответ
             if let id = cachedChannelId {
                 continuation.resume(returning: id)
                 return
@@ -106,20 +146,16 @@ final class TwitchChatManager: ObservableObject {
                     let decoded = try JSONDecoder().decode(UsersResponse.self, from: data)
                     guard let id = decoded.data.first?.id else { throw URLError(.badServerResponse) }
 
-                    channelIdLock.lock()
                     cachedChannelId = id
                     let waiting = channelIdContinuations
                     channelIdContinuations.removeAll()
                     channelIdFetchInProgress = false
-                    channelIdLock.unlock()
 
                     waiting.forEach { $0.resume(returning: id) }
                 } catch {
-                    channelIdLock.lock()
                     let waiting = channelIdContinuations
                     channelIdContinuations.removeAll()
                     channelIdFetchInProgress = false
-                    channelIdLock.unlock()
 
                     waiting.forEach { $0.resume(throwing: error) }
                 }
@@ -223,31 +259,6 @@ final class TwitchChatManager: ObservableObject {
             return
         }
         
-    // https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/
-        let desiredTypes = [
-            "channel.channel_points_custom_reward_redemption.add", // Поддержано | Использование баллов канала
-            "channel.chat.message", // Поддержано | Любой пользователь получает сообщение в чат
-            "channel.chat.clear", // Чат был очищен
-            "channel.chat.clear_user_messages", // Были удалены все сообщения от конкретного пользователя
-            "channel.chat.message_delete", // Конкретное сообщение было удалено
-            "channel.chat.notification", // уведомление при возникновении события в чате, например, при подписке на канал или при получении подарка в виде подписки
-            "channel.follow", // Бесплатная подписка на канал
-            "channel.subscribe", // Платная подписка на канал, без учета повторных подписок
-            "channel.subscription.end", // Окончание подписки на указанный канал
-            "channel.subscription.gift", // Подарочная платная подписка
-            "channel.subscription.message", // Уведомлении при повторной платной подписке
-            "channel.raid", // Рейд на канал
-            "channel.goal.progress", // Прогресс об изменениях в цели
-            "channel.goal.end", // Завершение цели
-            "channel.update", // Обовление данных о трансляции (название, категория)
-            "channel.ban", // Пользователь был заблокирован
-            "channel.unban", // Пользователь был разблокирован
-            "channel.vip.add", // Был добавлен VIP
-            "channel.vip.remove", // VIP Был удален
-            "channel.hype_train.begin", // Старт хайптрейна
-            "channel.hype_train.progress", // Хайптрейн набирает обороты
-            "channel.hype_train.end", // Завершение хайптрейна
-        ]
 
         // Получаем активные подписки
         var activeTypes = Set<String>()
@@ -266,7 +277,7 @@ final class TwitchChatManager: ObservableObject {
         }
 
         // Подписываемся на недостающие типы
-        for t in desiredTypes where !activeTypes.contains(t) {
+        for t in Self.desiredEventSubTypes where !activeTypes.contains(t) {
             do {
                 let url = URL(string: "\(TWITCH_HELIX_BASE_URL)/eventsub/subscriptions")!
                 var req = URLRequest(url: url)
@@ -343,9 +354,10 @@ extension TwitchChatManager {
                 EventSubLog.debug("session_welcome: session_id=\(sessionId)")
                 Task { await self.subscribeToEventSub(sessionId: sessionId) }
 
-            case .reconnect:
-                // Twitch просит переподключиться к новому URL
-                requestImmediateReconnect()
+            case .reconnect(let url):
+                // Twitch прислал адрес новой сессии: уходим на него сразу,
+                // без задержки и без сброса счётчика попыток.
+                eventSubSocket?.reconnect(to: url)
 
             case .chat(let chat):
                 let badgePairs = chat.badgePairs
@@ -395,11 +407,6 @@ extension TwitchChatManager {
             messages.removeFirst(messages.count - Constants.maxMessages)
         }
     }
-
-    private func requestImmediateReconnect() {
-        eventSubSocket?.scheduleReconnect(immediately: true)
-    }
-
 
     // MARK: - Билдер тела подписки
     private func buildEventSubSubscriptionBody(sessionId: String, userId: String) throws -> Data {

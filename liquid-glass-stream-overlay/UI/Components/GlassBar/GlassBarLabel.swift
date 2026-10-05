@@ -158,7 +158,7 @@ struct GlassBarLabel: View {
                 }
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.82), value: visibleMessages.map(\.id))
-            .onChange(of: visibleMessages.first?.id) { newFirstId in
+            .onChange(of: visibleMessages.first?.id, initial: false) { _, newFirstId in
                 guard isNotification else { return }
                 guard let newId = newFirstId else { return }
                 if newId != lastProcessedMessageId {
@@ -168,7 +168,7 @@ struct GlassBarLabel: View {
                     lastProcessedMessageId = newId
                 }
             }
-            .onChange(of: visibleMessages.map(\.id)) { _ in }
+            .onChange(of: visibleMessages.map(\.id), initial: false) { _, _ in }
         }
     }
 

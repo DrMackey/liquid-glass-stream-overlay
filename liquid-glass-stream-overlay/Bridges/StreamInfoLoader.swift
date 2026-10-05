@@ -56,7 +56,7 @@ extension TwitchChatManager {
             let channel = try JSONDecoder().decode(ChannelsResponse.self, from: chData).data.first
             guard let channel else { return }
 
-            await applyChannel(title: channel.title, gameName: channel.game_name)
+            applyChannel(title: channel.title, gameName: channel.game_name)
 
             if !channel.game_id.isEmpty {
                 let gURL = URL(string: "https://api.twitch.tv/helix/games?id=\(channel.game_id)")!
@@ -67,9 +67,9 @@ extension TwitchChatManager {
                 let finalURL = URL(string: boxTemplate
                     .replacingOccurrences(of: "{width}", with: "300")
                     .replacingOccurrences(of: "{height}", with: "450"))
-                await applyGameImage(url: finalURL)
+                applyGameImage(url: finalURL)
             } else {
-                await applyGameImage(url: nil)
+                applyGameImage(url: nil)
             }
         } catch {
             print("Ошибка обновления информации о стриме: \(error)")
