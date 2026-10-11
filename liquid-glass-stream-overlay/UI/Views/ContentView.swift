@@ -155,7 +155,7 @@ struct ContentView: View {
                             VStack {
                                 if let message = chat.lastMessage {
                                     let maxMessageWidth = 900
-                                    let displayMessage = chat.makeDisplayMessage(message, maxWidth: CGFloat(maxMessageWidth), badgeUrlMap: chat.allBadgeImages)
+                                    let displayMessage = chat.makeDisplayMessage(message, maxWidth: CGFloat(maxMessageWidth))
                                     
                                     MessageTextView(
                                         badges: displayMessage.badges,
@@ -178,11 +178,15 @@ struct ContentView: View {
                         
                         GlassBarLabel(
                             chat: chat,
-                            isNotification: true, insertionTransition: .move(edge: .trailing),
-                            removalTransition: .move(edge: .trailing).combined(with: .offset(x: 15))
+                            isNotification: true,
+                            insertionTransition: .asymmetric(
+                                insertion: .offset(x: 80).combined(with: .opacity),
+                                removal: .offset(x: 80).combined(with: .opacity)
+                            ),
+                            removalTransition: .offset(x: 80).combined(with: .opacity)
                         )
-                            .frame(maxWidth: 480, maxHeight: .infinity, alignment: .topTrailing)
-                            .padding()
+                        .frame(maxWidth: 480, alignment: .topTrailing)
+                        .padding()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }

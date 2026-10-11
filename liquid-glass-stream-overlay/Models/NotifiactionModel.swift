@@ -8,43 +8,62 @@
 import Foundation
 import SwiftUI
 
-/// Single model representing the structure of the provided JSON.
-/// Decoding/encoding is intentionally omitted per request.
-struct NotificationMessage: Sendable {
-    var metadata: Metadata
-    var payload: Payload
-
-    struct Metadata: Sendable {
-        var message_id: String
-        var message_type: String
-        var message_timestamp: String
-    }
-
-    struct Payload: Sendable {
-        var session: Session
-    }
-
-    struct Session: Sendable {
-        var id: String
-        var status: String
-        var connected_at: String
-        var keepalive_timeout_seconds: Int
-        var reconnect_url: String? // keep as String? to avoid decoding concerns
-    }
-}
-
+/// Уведомление о событии Twitch: заголовок и текст, как в мобильном уведомлении.
 struct Notification: Equatable, Identifiable {
     let id: UUID
+    /// Тип события, породившего уведомление.
+    let kind: SubscriptionKind
+    /// Заголовок уведомления. `nil` — показывать без заголовка.
+    let title: String?
+    /// Текст (тело) уведомления.
+    let body: String
+    /// Имя ассета иконки. `nil` — иконка по умолчанию.
+    let icon: String?
+    /// Акцентный цвет карточки. `nil` — без акцента.
+    let accent: Color?
     let sender: String
-    let text: String
-    let badges: [(String, String)]
     let senderColor: Color?
+    let badges: [(String, String)]
     let badgeViewData: [BadgeViewData]
+
+    /// Плоский текст «заголовок — тело» для общего потока сообщений.
+    var text: String {
+        guard let title, !title.isEmpty else { return body }
+        return "\(title) — \(body)"
+    }
+
+    init(
+        id: UUID,
+        kind: SubscriptionKind,
+        title: String?,
+        body: String,
+        icon: String? = nil,
+        accent: Color? = nil,
+        sender: String,
+        senderColor: Color?,
+        badges: [(String, String)] = [],
+        badgeViewData: [BadgeViewData] = []
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.body = body
+        self.icon = icon
+        self.accent = accent
+        self.sender = sender
+        self.senderColor = senderColor
+        self.badges = badges
+        self.badgeViewData = badgeViewData
+    }
 
     static func == (lhs: Notification, rhs: Notification) -> Bool {
         lhs.id == rhs.id &&
+        lhs.kind == rhs.kind &&
+        lhs.title == rhs.title &&
+        lhs.body == rhs.body &&
+        lhs.icon == rhs.icon &&
+        lhs.accent == rhs.accent &&
         lhs.sender == rhs.sender &&
-        lhs.text == rhs.text &&
         lhs.badges.elementsEqual(rhs.badges, by: { $0.0 == $1.0 && $0.1 == $1.1 }) &&
         lhs.senderColor == rhs.senderColor &&
         lhs.badgeViewData == rhs.badgeViewData

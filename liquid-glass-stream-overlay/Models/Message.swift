@@ -17,6 +17,8 @@ struct Message: Equatable, Identifiable {
     let badges: [(String, String)]
     let senderColor: Color?
     let badgeViewData: [BadgeViewData]
+    // Служебный маркер: сообщение-дубликат события уведомления (см. appendNotice).
+    var isNotice: Bool = false
 
     static func == (lhs: Message, rhs: Message) -> Bool {
         lhs.id == rhs.id &&
@@ -24,6 +26,7 @@ struct Message: Equatable, Identifiable {
         lhs.text == rhs.text &&
         lhs.badges.elementsEqual(rhs.badges, by: { $0.0 == $1.0 && $0.1 == $1.1 }) &&
         lhs.senderColor == rhs.senderColor &&
-        lhs.badgeViewData == rhs.badgeViewData
+        lhs.badgeViewData == rhs.badgeViewData &&
+        lhs.isNotice == rhs.isNotice
     }
 }

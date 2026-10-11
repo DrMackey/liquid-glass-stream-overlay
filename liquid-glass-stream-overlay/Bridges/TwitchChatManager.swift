@@ -14,39 +14,65 @@ func fetchChannelId(login: String) async throws -> String {
     return try await TwitchChatManager.sharedChannelId(login: login)
 }
 
-class Config {
-    static let shared = Config()
+/// Авторизационные данные и адреса Twitch.
+///
+/// Ничего из этого не хранится в исходниках. Значения приходят из
+/// `Info.plist`, куда они попадают при сборке из `$(TWITCH_*)`-настроек,
+/// а те, в свою очередь, — из `TwitchSecrets-*.xcconfig` для нужной среды.
+///
+/// Два набора credentials живут раздельно и переключаются конфигурацией
+/// сборки: `Debug` берёт `TwitchSecrets-Debug.local.xcconfig` (mock-сервер),
+/// `Release` — `TwitchSecrets-Release.local.xcconfig` (боевой Twitch).
+/// Реальные `.local.xcconfig` в Git не попадают, в репозитории лежат только
+/// обёртки и `.example`-шаблоны с пустыми ключами.
+///
+/// Адреса выбираются той же конфигурацией через `#if DEBUG`, поэтому Debug
+/// физически не может уйти на боевой Twitch, а Release — на mock.
+enum TwitchEnv {
 
-    var TwitchChannel: String {
-        return Bundle.main.infoDictionary?["TWITCH_CHANNEL"] as? String ?? ""
+    // MARK: Секреты
+
+    static var channel: String { info("TWITCH_CHANNEL") }
+    static var helixClientID: String { info("TWITCH_HELIX_CLIENT_ID") }
+    static var helixBearerToken: String { info("TWITCH_HELIX_BEARER_TOKEN") }
+
+    /// Не заведены ли credentials. Пустые значения не молча уезжают в сеть:
+    /// Twitch ответил бы 401, и причина была бы неочевидна.
+    static var isMissingCredentials: Bool {
+        helixClientID.isEmpty || helixBearerToken.isEmpty
     }
 
-    var TwitchHelixClientID: String {
-        return Bundle.main.infoDictionary?["TWITCH_HELIX_CLIENT_ID"] as? String ?? ""
+    private static func info(_ key: String) -> String {
+        (Bundle.main.infoDictionary?[key] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
-    var TwitchHelixBearerToken: String {
-        return Bundle.main.infoDictionary?["TWITCH_HELIX_BEARER_TOKEN"] as? String ?? ""
+    // MARK: Адреса
+
+    #if DEBUG
+    static let helixBaseURL = "http://localhost:8080/mock"
+    static let eventSubURL = "ws://127.0.0.1:8080/ws"
+    #else
+    static let helixBaseURL = "https://api.twitch.tv/helix"
+    static let eventSubURL = "wss://eventsub.wss.twitch.tv/ws"
+    #endif
+
+    static var eventSubURLValue: URL {
+        guard let url = URL(string: eventSubURL) else {
+            preconditionFailure("Некорректный адрес EventSub: \(eventSubURL)")
+        }
+        return url
     }
 }
 
-//let TWITCH_HELIX_BASE_URL = "https://api.twitch.tv/helix"
-
-// Константы помечены `nonisolated`: без этого модуль (где по умолчанию
+// Глобалы помечены `nonisolated`: без этого модуль (где по умолчанию
 // действует изоляция главного актора) делает их главноакторными, и любая
 // фоновая задача — `async let`, `Task.detached`, сетевой колбэк — не может
 // к ним обратиться. Это неизменяемые `String`, то есть `Sendable`.
-nonisolated let TWITCH_HELIX_BASE_URL = "http://localhost:8080/mock"
-
-//Авторизационные данные для основы
-//let TWITCH_CHANNEL = Config.shared.TwitchChannel
-//let TWITCH_HELIX_CLIENT_ID = Config.shared.TwitchHelixClientID
-//let TWITCH_HELIX_BEARER_TOKEN = Config.shared.TwitchHelixBearerToken
-
-//Дебаг режим
-nonisolated let TWITCH_CHANNEL = Config.shared.TwitchChannel
-nonisolated let TWITCH_HELIX_CLIENT_ID = "xbhqka8dire6qufn4xttrrcylalpil"
-nonisolated let TWITCH_HELIX_BEARER_TOKEN = "iigl9icsx0kyc973amwr1rb4lyo699"
+nonisolated let TWITCH_HELIX_BASE_URL = TwitchEnv.helixBaseURL
+nonisolated let TWITCH_CHANNEL = TwitchEnv.channel
+nonisolated let TWITCH_HELIX_CLIENT_ID = TwitchEnv.helixClientID
+nonisolated let TWITCH_HELIX_BEARER_TOKEN = TwitchEnv.helixBearerToken
 
 // MARK: - Модель частей сообщения (текст/эмоут)
 enum MessagePart: Hashable {
@@ -94,7 +120,7 @@ final class TwitchChatManager: ObservableObject {
     enum Constants {
         static let maxMessages = 20
         static let streamInfoInterval: UInt64 = 30 * 1_000_000_000
-        static let notificationDisplayTime: TimeInterval = 5
+        static let notificationDisplayTime = NotificationConstants.displayTime
         static let maxReconnectDelay: TimeInterval = 60
         static let keepaliveTimeout: TimeInterval = 15  // Twitch гарантирует keepalive каждые 10с
     }
@@ -189,10 +215,24 @@ final class TwitchChatManager: ObservableObject {
     private var eventSubSessionId: String?
     private var eventSubSocket: EventSubSocketClient?
     private var eventSubConsumerTask: Task<Void, Never>?
-    private let eventSubURL = URL(string: "ws://127.0.0.1:8080/ws")!
+    private let eventSubURL = TwitchEnv.eventSubURLValue
 
     // MARK: - Init
-    init() {
+    /// - Parameter startNetwork: Поднимать ли EventSub-сокет и цикл инфо о стриме.
+    ///   Тестам нужен менеджер только как носитель карт эмоутов, поэтому они
+    ///   передают `false` и не открывают ни одного соединения.
+    init(startNetwork: Bool = true) {
+        if startNetwork {
+            startNetworkStack()
+        }
+        setupNotificationsAutoClear(
+                    notificationDisplayTime: Constants.notificationDisplayTime,
+                    manager: self,
+                    cancellables: &cancellables
+                )
+    }
+
+    private func startNetworkStack() {
         streamInfoTask = Task { [weak self] in
             await self?.runStreamInfoLoop()
         }
@@ -204,14 +244,16 @@ final class TwitchChatManager: ObservableObject {
         )
         eventSubSocket = socket
         consumeEventSubEvents(from: socket)
+        if TwitchEnv.isMissingCredentials {
+            EventSubLog.info("""
+                Credentials не заданы: подключение к Twitch будет отклонено (401). \
+                Скопируй TwitchSecrets-<Debug|Release>.local.example.xcconfig \
+                в .local.xcconfig рядом и впиши значения.
+                """)
+        }
         socket.start()
-        setupNotificationsAutoClear(
-                    notificationDisplayTime: 5,
-                    manager: self,
-                    cancellables: &cancellables
-                )
     }
-    
+
     // MARK: - Stop
     func stop() {
         EventSubLog.info("stop()")
@@ -388,17 +430,27 @@ extension TwitchChatManager {
     private func appendNotice(_ event: EventSubNotice) {
         let id = event.messageId.flatMap { UUID(uuidString: $0) } ?? UUID()
         let sender = event.userName ?? "eventsub"
-        // Заголовка может не быть (например, у `channel.subscription.gift`).
-        // Раньше fallback'ом служил сырой JSON, но типизированная модель его не
-        // хранит, поэтому показываем тип подписки — он информативнее.
-        let body = event.title.flatMap { $0.isEmpty ? nil : $0 } ?? event.subscriptionType
-        let text = "Получена награда — \(body)"
+        // Текст уведомления берётся из шаблона события; для событий без шаблона
+        // заголовком события служит его тело, а заголовок не показывается.
+        let rendered = NotificationTemplates.rendered(for: event)
         let badgeViewData = badgeViews(from: [], badgeUrlMap: allBadgeImages)
 
-        notifications.append(Notification(id: id, sender: sender, text: text,
-                                          badges: [], senderColor: .gray, badgeViewData: badgeViewData))
-        messages.append(Message(id: UUID(), sender: sender, text: text,
-                                badges: [], senderColor: .gray, badgeViewData: badgeViewData))
+        let notification = Notification(
+            id: id,
+            kind: event.kind,
+            title: rendered.title,
+            body: rendered.body,
+            icon: rendered.icon,
+            accent: rendered.accent,
+            sender: sender,
+            senderColor: .gray,
+            badges: [],
+            badgeViewData: badgeViewData
+        )
+        notifications.append(notification)
+        messages.append(Message(id: UUID(), sender: sender, text: notification.text,
+                                badges: [], senderColor: .gray, badgeViewData: badgeViewData,
+                                isNotice: true))
         trimMessages()
     }
 
@@ -436,17 +488,6 @@ extension TwitchChatManager {
 
 //MARK: - Convenience inits
 extension Message {
-    init(sender: String, text: String, badges: [(String, String)], senderColor: Color?, badgeViewData: [BadgeViewData]) {
-        self.id = UUID()
-        self.sender = sender
-        self.text = text
-        self.badges = badges
-        self.senderColor = senderColor
-        self.badgeViewData = badgeViewData
-    }
-}
-
-extension Notification {
     init(sender: String, text: String, badges: [(String, String)], senderColor: Color?, badgeViewData: [BadgeViewData]) {
         self.id = UUID()
         self.sender = sender

@@ -26,126 +26,140 @@ struct GlassBarLabel: View {
     var insertionTransition: AnyTransition = .scale.combined(with: .opacity)
     var removalTransition: AnyTransition = .move(edge: .bottom).combined(with: .opacity)
     let stackingThreshold: CGFloat = 200
-    let maxVisibleMessages = 12
-    let spacing: CGFloat = 16
+    let maxVisibleMessages = NotificationConstants.maxVisibleItems
+    let spacing: CGFloat = NotificationConstants.stackSpacing
     @Namespace private var messageAnim
 
-    @State private var messageHeights: [Message.ID: CGFloat] = [:]
-    
-    // ДОБАВЬТЕ ЭТУ ПЕРЕМЕННУЮ: для отслеживания последнего обработанного сообщения
-    @State private var lastProcessedMessageId: Message.ID? = nil
+    @State private var messageHeights: [UUID: CGFloat] = [:]
 
-    // MARK: - Computation helpers to reduce type-checking complexity
-    private func messagesSource(availableMessages: [Message], availableNotifications: [Message], isNotification: Bool) -> [Message] {
-        if isNotification { return availableNotifications }
-        return availableMessages
+    // ДОБАВЬТЕ ЭТУ ПЕРЕМЕННУЮ: для отслеживания последнего обработанного сообщения
+    @State private var lastProcessedMessageId: UUID? = nil
+
+    /// Элемент стека: сообщение чата либо уведомление события.
+    /// Раскладка (смещения, видимость, высоты) работает с `id`, не завязываясь на конкретный тип.
+    private enum StackItem: Identifiable {
+        case message(Message)
+        case notification(Notification)
+
+        var id: UUID {
+            switch self {
+            case .message(let message): return message.id
+            case .notification(let notification): return notification.id
+            }
+        }
     }
 
-    private func computeOffsets(for messages: [Message], messageHeights: [Message.ID: CGFloat], spacing: CGFloat) -> [CGFloat] {
+    // MARK: - Computation helpers to reduce type-checking complexity
+
+    /// Свежие элементы сверху, не больше `maxVisibleMessages`; набор зависит от режима.
+    private func stackItems() -> [StackItem] {
+        if isNotification {
+            return Array(chat.notifications.suffix(maxVisibleMessages).reversed()).map { .notification($0) }
+        }
+        return Array(chat.messages.suffix(maxVisibleMessages).reversed()).map { .message($0) }
+    }
+
+    private func computeOffsets(for items: [StackItem], messageHeights: [UUID: CGFloat], spacing: CGFloat) -> [CGFloat] {
         var result: [CGFloat] = []
-        result.reserveCapacity(messages.count)
+        result.reserveCapacity(items.count)
         var currentOffset: CGFloat = 0
-        for message in messages {
+        for item in items {
             result.append(currentOffset)
-            let height: CGFloat = messageHeights[message.id] ?? 48
+            let height: CGFloat = messageHeights[item.id] ?? NotificationConstants.defaultRowHeight
             currentOffset += height + spacing
         }
         return result
     }
 
-    private func visibleIndices(offsets: [CGFloat], messages: [Message], availableHeight: CGFloat, messageHeights: [Message.ID: CGFloat]) -> [Int] {
+    private func visibleIndices(offsets: [CGFloat], items: [StackItem], availableHeight: CGFloat, messageHeights: [UUID: CGFloat]) -> [Int] {
         var indices: [Int] = []
-        indices.reserveCapacity(messages.count)
+        indices.reserveCapacity(items.count)
         for (idx, offset) in offsets.enumerated() {
-            let message = messages[idx]
-            let height: CGFloat = messageHeights[message.id] ?? 48
+            let item = items[idx]
+            let height: CGFloat = messageHeights[item.id] ?? NotificationConstants.defaultRowHeight
             if offset + height <= availableHeight { indices.append(idx) }
         }
         return indices
     }
 
-    var body: some View {
-        GeometryReader { geo in
-            let availableHeight: CGFloat = geo.size.height
-            let baseMessages: [Message] = Array(chat.messages.suffix(maxVisibleMessages).reversed())
-            let baseNotificationsRaw = Array(chat.notifications.suffix(maxVisibleMessages).reversed())
+    /// Строит представление одного элемента стека: сообщение чата или карточку уведомления.
+    @ViewBuilder
+    private func itemView(_ item: StackItem, width: CGFloat, index: Int, totalCount: Int) -> some View {
+        switch item {
+        case .message(let message):
+            let isNotice = message.isNotice
+            let display = DisplayMessage(
+                badges: message.badgeViewData,
+                sender: isNotice ? NotificationConstants.notificationSender : message.sender,
+                senderColor: isNotice
+                    ? NotificationConstants.notificationSenderColor
+                    : (message.sender == "system" ? .gray : (message.senderColor ?? .red)),
+                visibleParts: chat.parseMessageWithEmotes(message.text),
+                isTruncated: false
+            )
+            let layout = MessageLayout(message: display, index: index, isCollapsed: false, stackPosition: index)
 
-            // Map notifications to Message explicitly to reduce inference work
-            let notificationsAsMessages: [Message] = baseNotificationsRaw.map { notif in
-                Message(
-                    id: notif.id,
-                    sender: notif.sender,
-                    text: notif.text,
-                    badges: notif.badges,
-                    senderColor: notif.senderColor,
-                    badgeViewData: notif.badgeViewData
+            HStack(alignment: .top, spacing: 8) {
+                CollapsibleMessageView(
+                    layout: layout,
+                    maxWidth: width,
+                    totalCount: totalCount,
+                    contentPaddingH: NotificationConstants.cardPaddingH,
+                    contentPaddingV: NotificationConstants.cardPaddingV,
+                    bubbleCornerRadius: NotificationConstants.cardCornerRadius
                 )
             }
 
-            let messages: [Message] = messagesSource(
-                availableMessages: baseMessages,
-                availableNotifications: notificationsAsMessages,
-                isNotification: isNotification
+        case .notification(let notification):
+            NotificationCardView(
+                notification: notification,
+                maxWidth: width,
+                contentPaddingH: NotificationConstants.cardPaddingH,
+                contentPaddingV: NotificationConstants.cardPaddingV,
+                bubbleCornerRadius: NotificationConstants.cardCornerRadius
             )
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let availableHeight: CGFloat = geo.size.height
+            let items: [StackItem] = stackItems()
 
             let offsets: [CGFloat] = computeOffsets(
-                for: messages,
+                for: items,
                 messageHeights: messageHeights,
                 spacing: spacing
             )
 
             let visIndices: [Int] = visibleIndices(
                 offsets: offsets,
-                messages: messages,
+                items: items,
                 availableHeight: availableHeight,
                 messageHeights: messageHeights
             )
 
-            let visibleMessages: [Message] = visIndices.map { messages[$0] }
-            
-            
-            
+            let visibleItems: [StackItem] = visIndices.map { items[$0] }
+
             ZStack(alignment: .top) {
-                ForEach(visibleMessages) { message in
-                    let idx = visibleMessages.firstIndex(where: { $0.id == message.id }) ?? 0
+                ForEach(visibleItems) { item in
+                    let idx = visibleItems.firstIndex(where: { $0.id == item.id }) ?? 0
                     let y = offsets[visIndices[idx]]
-                    
-                    Group {
-                        let display = DisplayMessage(
-                            badges: message.badgeViewData,
-                            sender: message.sender,
-                            senderColor: (message.sender == "system" ? .gray : (message.senderColor ?? .red)),
-                            visibleParts: chat.parseMessageWithEmotes(message.text),
-                            isTruncated: false
-                        )
-                        let layout = MessageLayout(message: display, index: idx, isCollapsed: false, stackPosition: idx)
 
-                        HStack(alignment: .top, spacing: 8) {
-
-                            CollapsibleMessageView(
-                                layout: layout,
-                                maxWidth: geo.size.width,
-                                totalCount: visibleMessages.count,
-                                contentPaddingH: 24,
-                                contentPaddingV: 20,
-                                bubbleCornerRadius: 32,
-                                isNotification: isNotification
-                            )
-                        }
-                        .matchedGeometryEffect(id: message.id, in: messageAnim)
+                    itemView(item, width: geo.size.width, index: idx, totalCount: visibleItems.count)
+                        .matchedGeometryEffect(id: item.id, in: messageAnim)
                         .offset(y: y)
                         .transition(.asymmetric(insertion: insertionTransition, removal: removalTransition))
                         .background(
                             GeometryReader { geoMsg in
                                 Color.clear
-                                    .preference(key: MessageHeightKey.self, value: [message.id: geoMsg.size.height])
+                                    .preference(key: ItemHeightKey.self, value: [item.id: geoMsg.size.height])
                             }
                         )
-                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .onPreferenceChange(MessageHeightKey.self) { newHeights in
+            .onPreferenceChange(ItemHeightKey.self) { newHeights in
                 var changed = false
                 for (key, height) in newHeights {
                     if messageHeights[key] != height {
@@ -157,8 +171,8 @@ struct GlassBarLabel: View {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {}
                 }
             }
-            .animation(.spring(response: 0.3, dampingFraction: 0.82), value: visibleMessages.map(\.id))
-            .onChange(of: visibleMessages.first?.id, initial: false) { _, newFirstId in
+            .animation(.spring(response: 0.3, dampingFraction: 0.82), value: visibleItems.map(\.id))
+            .onChange(of: visibleItems.first?.id, initial: false) { _, newFirstId in
                 guard isNotification else { return }
                 guard let newId = newFirstId else { return }
                 if newId != lastProcessedMessageId {
@@ -168,15 +182,13 @@ struct GlassBarLabel: View {
                     lastProcessedMessageId = newId
                 }
             }
-            .onChange(of: visibleMessages.map(\.id), initial: false) { _, _ in }
         }
     }
 
-    private struct MessageHeightKey: PreferenceKey {
-        static var defaultValue: [Message.ID: CGFloat] = [:]
-        static func reduce(value: inout [Message.ID: CGFloat], nextValue: () -> [Message.ID: CGFloat]) {
+    private struct ItemHeightKey: PreferenceKey {
+        static var defaultValue: [UUID: CGFloat] = [:]
+        static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) {
             value.merge(nextValue()) { $1 }
         }
     }
 }
-

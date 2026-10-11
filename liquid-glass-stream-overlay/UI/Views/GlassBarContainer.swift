@@ -47,7 +47,7 @@ struct GlassBarContainer: View {
     }
 }
 
-// Левый стеклянный блок с подсказкой "разблокируйте Вебкамеру"
+// Левый стеклянный блок с подсказкой "разблокируй Вебкамеру"
 struct GlassUnlockPromptView: View {
     var body: some View {
         ZStack {
@@ -65,7 +65,7 @@ struct GlassUnlockPromptView: View {
                         .opacity(0.25)
                     Spacer(minLength: 0) }
                 
-                Text("РАЗБЛОКИРУЙТЕ ВЕБКАМЕРУ\nЗА БАЛЛЫ КАНАЛА")
+                Text("РАЗБЛОКИРУЙ ВЕБКАМЕРУ\nЗА БАЛЛЫ КАНАЛА")
                     .font(.system(size: 24, weight: .bold))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)

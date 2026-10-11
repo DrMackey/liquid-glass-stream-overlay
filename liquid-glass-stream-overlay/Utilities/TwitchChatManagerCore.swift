@@ -8,7 +8,7 @@ import AppKit
 // MARK: - SwiftUI-вью для отображения сообщения: бейджи, ник, текст/эмоута
 extension TwitchChatManager {
     // MARK: - Подготовка отображаемого сообщения и расчёт видимых частей
-    func makeDisplayMessage(_ message: Message, maxWidth: CGFloat, badgeUrlMap: [String: [String: String]]) -> DisplayMessage {
+    func makeDisplayMessage(_ message: Message, maxWidth: CGFloat) -> DisplayMessage {
         // Выбор платформенного шрифта для замеров
         let badgeData = message.badgeViewData
         let parts = parseMessageWithEmotes(message.text)
@@ -24,16 +24,14 @@ extension TwitchChatManager {
         )
     }
     // Подсчёт ширины частей и бинарный поиск по длине текста для усечения
-    func calculateVisibleParts(parts: [MessagePart], font: Any, maxWidth: CGFloat) -> ([MessagePart], Bool) {
-        // Платформенное приведение типа шрифта
-        let fnt = font as! NSFont
+    func calculateVisibleParts(parts: [MessagePart], font: NSFont, maxWidth: CGFloat) -> ([MessagePart], Bool) {
         var width: CGFloat = 0
         var visibleParts: [MessagePart] = []
         for part in parts {
             let partWidth: CGFloat
             switch part {
             case .text(let str):
-                partWidth = str.size(withAttributes: [.font: fnt]).width + fnt.pointSize * 0.3
+                partWidth = str.size(withAttributes: [.font: font]).width + font.pointSize * 0.3
             case .emote:
                 partWidth = 32
             }
@@ -50,7 +48,7 @@ extension TwitchChatManager {
                     while low <= high {
                         let mid = (low + high) / 2
                         let prefix = String(str.prefix(mid))
-                        let prefixWidth = prefix.size(withAttributes: [.font: fnt]).width + fnt.pointSize * 0.3
+                        let prefixWidth = prefix.size(withAttributes: [.font: font]).width + font.pointSize * 0.3
                         if prefixWidth <= remainingWidth {
                             fittingLength = mid
                             low = mid + 1

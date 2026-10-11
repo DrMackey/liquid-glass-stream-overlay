@@ -88,19 +88,30 @@ nonisolated struct EventSubNotice: Sendable, Equatable {
     let userName: String?
     /// Заголовок: награда, текст уведомления в чате, название цели, заголовок стрима.
     let title: String?
+    /// Данные события для подстановки в шаблоны уведомлений.
+    ///
+    /// Ключ — имя плейсхолдера (`{user}`, `{viewers}` и т.п.), значение — уже
+    /// строковое представление поля. Пустые и отсутствующие у Twitch поля
+    /// в словарь не попадают, чтобы шаблон мог отличить «нет данных» от «пусто».
+    ///
+    /// Общие ключи: `user` (субъект события), `to`, `tier`, `total`, `months`,
+    /// `reward`, `input`, `text`, `goal`, `progress`, `goalAmount`, `viewers`.
+    let fields: [String: String]
 
     init(
         kind: SubscriptionKind,
         subscriptionType: String,
         messageId: String? = nil,
         userName: String? = nil,
-        title: String? = nil
+        title: String? = nil,
+        fields: [String: String] = [:]
     ) {
         self.kind = kind
         self.subscriptionType = subscriptionType
         self.messageId = messageId
         self.userName = userName
         self.title = title
+        self.fields = fields
     }
 
     /// Дополняет проекцию идентификатором сообщения из `metadata`.
@@ -110,7 +121,8 @@ nonisolated struct EventSubNotice: Sendable, Equatable {
             subscriptionType: subscriptionType,
             messageId: messageId,
             userName: userName,
-            title: title
+            title: title,
+            fields: fields
         )
     }
 }
@@ -128,11 +140,19 @@ nonisolated struct RewardRedemptionEvent: Decodable, Equatable {
     }
 
     var notice: EventSubNotice {
-        EventSubNotice(
+        var fields: [String: String] = [
+            "user": user_name,
+            "reward": reward.title
+        ]
+        if let user_input, !user_input.isEmpty {
+            fields["input"] = user_input
+        }
+        return EventSubNotice(
             kind: .channelPointsRewardRedemption,
             subscriptionType: SubscriptionKind.channelPointsRewardRedemption.rawValue,
             userName: user_name,
-            title: reward.title
+            title: reward.title,
+            fields: fields
         )
     }
 }
@@ -186,7 +206,8 @@ nonisolated struct ChatNotificationEvent: Decodable, Equatable {
             kind: .chatNotification,
             subscriptionType: SubscriptionKind.chatNotification.rawValue,
             userName: chatter_user_name,
-            title: message.text
+            title: message.text,
+            fields: ["user": chatter_user_name, "text": message.text]
         )
     }
 }
@@ -201,7 +222,8 @@ nonisolated struct FollowEvent: Decodable, Equatable {
         EventSubNotice(
             kind: .follow,
             subscriptionType: SubscriptionKind.follow.rawValue,
-            userName: user_name
+            userName: user_name,
+            fields: ["user": user_name]
         )
     }
 }
@@ -215,7 +237,8 @@ nonisolated struct SubscribeEvent: Decodable, Equatable {
         EventSubNotice(
             kind: .subscribe,
             subscriptionType: SubscriptionKind.subscribe.rawValue,
-            userName: user_name
+            userName: user_name,
+            fields: ["user": user_name, "tier": tier]
         )
     }
 }
@@ -229,7 +252,8 @@ nonisolated struct SubscriptionEndEvent: Decodable, Equatable {
         EventSubNotice(
             kind: .subscriptionEnd,
             subscriptionType: SubscriptionKind.subscriptionEnd.rawValue,
-            userName: user_name
+            userName: user_name,
+            fields: ["user": user_name, "tier": tier]
         )
     }
 }
@@ -241,10 +265,18 @@ nonisolated struct SubscriptionGiftEvent: Decodable, Equatable {
     let tier: String
 
     var notice: EventSubNotice {
-        EventSubNotice(
+        var fields: [String: String] = [
+            "total": String(total),
+            "tier": tier
+        ]
+        if let user_name, !user_name.isEmpty {
+            fields["user"] = user_name
+        }
+        return EventSubNotice(
             kind: .subscriptionGift,
             subscriptionType: SubscriptionKind.subscriptionGift.rawValue,
-            userName: user_name
+            userName: user_name,
+            fields: fields
         )
     }
 }
@@ -256,11 +288,19 @@ nonisolated struct SubscriptionMessageEvent: Decodable, Equatable {
     let cumulative_months: Int
 
     var notice: EventSubNotice {
-        EventSubNotice(
+        var fields: [String: String] = [
+            "user": user_name,
+            "months": String(cumulative_months)
+        ]
+        if let message_text, !message_text.isEmpty {
+            fields["text"] = message_text
+        }
+        return EventSubNotice(
             kind: .subscriptionMessage,
             subscriptionType: SubscriptionKind.subscriptionMessage.rawValue,
             userName: user_name,
-            title: message_text
+            title: message_text,
+            fields: fields
         )
     }
 }
@@ -281,7 +321,12 @@ nonisolated struct RaidEvent: Decodable, Equatable {
         EventSubNotice(
             kind: .raid,
             subscriptionType: SubscriptionKind.raid.rawValue,
-            userName: from_broadcaster_user_name
+            userName: from_broadcaster_user_name,
+            fields: [
+                "user": from_broadcaster_user_name,
+                "to": to_broadcaster_user_name,
+                "viewers": String(viewers)
+            ]
         )
     }
 }
@@ -302,10 +347,18 @@ nonisolated struct GoalProgressEvent: Decodable, Equatable {
     let progress: Double
 
     var notice: EventSubNotice {
-        EventSubNotice(
+        var fields: [String: String] = ["goal": goal.title]
+        if let current = goal.current_amount {
+            fields["progress"] = String(current)
+        }
+        if let target = goal.target_amount {
+            fields["goalAmount"] = String(target)
+        }
+        return EventSubNotice(
             kind: .goalProgress,
             subscriptionType: SubscriptionKind.goalProgress.rawValue,
-            title: goal.title
+            title: goal.title,
+            fields: fields
         )
     }
 }
@@ -316,10 +369,18 @@ nonisolated struct GoalEndEvent: Decodable, Equatable {
     let ended_at: String
 
     var notice: EventSubNotice {
-        EventSubNotice(
+        var fields: [String: String] = ["goal": goal.title]
+        if let current = goal.current_amount {
+            fields["progress"] = String(current)
+        }
+        if let target = goal.target_amount {
+            fields["goalAmount"] = String(target)
+        }
+        return EventSubNotice(
             kind: .goalEnd,
             subscriptionType: SubscriptionKind.goalEnd.rawValue,
-            title: goal.title
+            title: goal.title,
+            fields: fields
         )
     }
 }
@@ -379,7 +440,8 @@ nonisolated struct VipEvent: Decodable, Equatable {
         EventSubNotice(
             kind: kind,
             subscriptionType: kind.rawValue,
-            userName: user_name
+            userName: user_name,
+            fields: ["user": user_name]
         )
     }
 }
@@ -397,7 +459,14 @@ nonisolated struct HypeTrainEvent: Decodable, Equatable {
     let goal: Int?
 
     func notice(for kind: SubscriptionKind) -> EventSubNotice {
-        EventSubNotice(kind: kind, subscriptionType: kind.rawValue)
+        var fields: [String: String] = ["total": String(total)]
+        if let progress {
+            fields["progress"] = String(progress)
+        }
+        if let goal {
+            fields["goalAmount"] = String(goal)
+        }
+        return EventSubNotice(kind: kind, subscriptionType: kind.rawValue, fields: fields)
     }
 }
 

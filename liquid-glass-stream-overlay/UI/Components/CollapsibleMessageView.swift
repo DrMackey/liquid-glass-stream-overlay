@@ -22,7 +22,6 @@ struct CollapsibleMessageView: View {
     var contentPaddingH: CGFloat = 12  // Горизонтальные отступы внутри пузыря
     var contentPaddingV: CGFloat = 10  // Вертикальные отступы внутри пузыря
     var bubbleCornerRadius: CGFloat = 16  // Радиус скругления углов пузыря
-    let isNotification: Bool
     
     init(
         layout: MessageLayout,
@@ -30,8 +29,7 @@ struct CollapsibleMessageView: View {
         totalCount: Int,
         contentPaddingH: CGFloat = 12,
         contentPaddingV: CGFloat = 10,
-        bubbleCornerRadius: CGFloat = 16,
-        isNotification: Bool
+        bubbleCornerRadius: CGFloat = 16
     ) {
         self.layout = layout
         self.maxWidth = maxWidth
@@ -39,7 +37,6 @@ struct CollapsibleMessageView: View {
         self.contentPaddingH = contentPaddingH
         self.contentPaddingV = contentPaddingV
         self.bubbleCornerRadius = bubbleCornerRadius
-        self.isNotification = isNotification
     }
     
     /*
@@ -199,16 +196,7 @@ struct CollapsibleMessageView: View {
     }
     
     private var messageContent: some View {
-        HStack(spacing: 16) {
-            if (isNotification) {
-                    Image("Twitch")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 60, height: 60)
-//                        .padding(.top, 6)
-            }
-            
-            FlowRows(items: buildFlowItems(), hSpacing: 6, vSpacing: 2, rowAlignment: .firstTextBaseline, spacingProvider: { current, next in
+        FlowRows(items: buildFlowItems(), hSpacing: 6, vSpacing: 2, rowAlignment: .firstTextBaseline, spacingProvider: { current, next in
                 // Если текущий и следующий элементы — слова, не добавляем межэлементный отступ, пробел уже входит в токен
                 let currentIsWord: Bool
                 let nextIsWord: Bool
@@ -239,7 +227,6 @@ struct CollapsibleMessageView: View {
     //                    .background(Color.red)
                 }
             }
-        }
     }
     
     /*

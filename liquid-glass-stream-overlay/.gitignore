@@ -39,6 +39,9 @@ fastlane/Preview.html
 .env.*
 
 # Secrets / build configuration files
+# Файлы с реальными значениями. В Git попадают только *.xcconfig-обёртки
+# и *.local.example.xcconfig с пустыми ключами.
+*.local.xcconfig
 TwitchSecrets.xcconfig
 
 # Other

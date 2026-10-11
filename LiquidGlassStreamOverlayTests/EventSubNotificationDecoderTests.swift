@@ -139,6 +139,59 @@ struct EventSubNotificationDecoderTests {
         #expect(chat.rawColorHex == "#FF0000")
     }
 
+    // MARK: - Поля шаблонов
+
+    @Test("События заполняют поля-плейсхолдеры для шаблонов")
+    func eventsFillTemplateFields() throws {
+        let raid = try #require(Self.eventNotice(
+            type: "channel.raid",
+            event: #"{"from_broadcaster_user_name":"Raider","to_broadcaster_user_name":"Streamer","viewers":42}"#
+        ))
+        #expect(raid.fields == ["user": "Raider", "to": "Streamer", "viewers": "42"])
+
+        let subscribe = try #require(Self.eventNotice(
+            type: "channel.subscribe",
+            event: #"{"user_name":"Awesome_User","tier":"1000"}"#
+        ))
+        #expect(subscribe.fields == ["user": "Awesome_User", "tier": "1000"])
+
+        let redemption = try #require(Self.eventNotice(
+            type: "channel.channel_points_custom_reward_redemption.add",
+            event: #"{"user_name":"Cool_Viewer","reward":{"title":"Обед в студии"},"user_input":"съешь бургер"}"#
+        ))
+        #expect(redemption.fields["user"] == "Cool_Viewer")
+        #expect(redemption.fields["reward"] == "Обед в студии")
+        #expect(redemption.fields["input"] == "съешь бургер")
+
+        let gift = try #require(Self.eventNotice(
+            type: "channel.subscription.gift",
+            event: #"{"user_name":"Generous_Gifter","total":5,"tier":"1000"}"#
+        ))
+        #expect(gift.fields == ["user": "Generous_Gifter", "total": "5", "tier": "1000"])
+    }
+
+    @Test("Анонимный подарок не добавляет поле user")
+    func anonymousGiftHasNoUserField() throws {
+        let notice = try #require(Self.eventNotice(
+            type: "channel.subscription.gift",
+            event: #"{"total":5,"tier":"1000","is_anonymous":true}"#
+        ))
+        #expect(notice.fields["user"] == nil)
+        #expect(notice.fields["total"] == "5")
+        #expect(notice.fields["tier"] == "1000")
+    }
+
+    @Test("Цель отдаёт прогресс и целевую сумму")
+    func goalFieldsPopulateFromAmounts() throws {
+        let goal = try #require(Self.eventNotice(
+            type: "channel.goal.progress",
+            event: #"{"goal":{"title":"1000 отжиманий","current_amount":10,"target_amount":1000},"progress":1.0}"#
+        ))
+        #expect(goal.fields["goal"] == "1000 отжиманий")
+        #expect(goal.fields["progress"] == "10")
+        #expect(goal.fields["goalAmount"] == "1000")
+    }
+
     // MARK: - Строгость разбора
 
     @Test("Обязательные поля проверяются", arguments: [
@@ -237,7 +290,8 @@ struct EventSubNotificationDecoderTests {
             kind: .follow,
             subscriptionType: "channel.follow",
             messageId: "mid-channel.follow",
-            userName: "User"
+            userName: "User",
+            fields: ["user": "User"]
         ))])
 
         let unsupported = try JSONDecoder().decode(
@@ -252,6 +306,18 @@ struct EventSubNotificationDecoderTests {
     /// Минимальные валидные payload'ы из `cases`, собранные в словарь.
     private static var minimalEvents: [String: String] {
         Dictionary(uniqueKeysWithValues: cases.map { ($0.type, $0.event) })
+    }
+
+    /// Разбирает минимальное notification-сообщение и возвращает его `EventSubNotice`.
+    private static func eventNotice(type: String, event: String) -> EventSubNotice? {
+        guard let decoded = try? JSONDecoder().decode(
+            EventSubEvent.self,
+            from: makeNotification(type: type, event: event)
+        ), case .notification(let payload) = decoded,
+           case .event(let notice) = payload else {
+            return nil
+        }
+        return notice
     }
 
     private static func makeNotification(type: String, event: String) -> Data {
