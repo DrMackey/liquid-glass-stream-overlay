@@ -101,6 +101,8 @@ nonisolated enum EventSubEvent: Decodable, Sendable {
 nonisolated enum EventSubNotificationPayload: Sendable, Equatable {
     /// `channel.chat.message` — горячий путь, отдельная модель и отдельный маршрут.
     case chat(ChatMessageEvent)
+    /// `channel.update` — тихое обновление данных о трансляции, без уведомления.
+    case streamUpdate(StreamUpdateEvent)
     /// Любая другая подписка, разобранная в её собственную модель.
     case event(EventSubNotice)
     /// Тип подписки неизвестен приложению: событие игнорируется, но не считается ошибкой.

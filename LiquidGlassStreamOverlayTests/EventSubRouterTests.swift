@@ -116,6 +116,18 @@ struct EventSubRouterTests {
         #expect(event.subscriptionType == "channel.subscription.gift")
     }
 
+    @Test("channel.update превращается в тихое действие обновления, а не в уведомление")
+    func streamUpdateRoutesToStreamUpdateAction() throws {
+        let update = StreamUpdateEvent(
+            title: "Новое название стрима",
+            category_name: "Just Chatting",
+            category_id: "509658"
+        )
+        let actions = EventSubRouter.actions(for: .notification(payload: .streamUpdate(update)))
+
+        #expect(actions == [.streamUpdate(update)])
+    }
+
     // MARK: - Полнота покрытия
 
     @Test("Каждая фикстура маршрутизируется ровно одним действием или ни одним")

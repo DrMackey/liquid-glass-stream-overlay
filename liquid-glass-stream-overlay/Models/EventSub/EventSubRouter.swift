@@ -24,6 +24,9 @@ nonisolated enum EventSubRouter {
         case reconnect(url: URL?)
         /// Новое сообщение чата.
         case chat(ChatMessageEvent)
+        /// `channel.update` — тихое обновление данных о трансляции (заголовок,
+        /// категория, постер). Не показывается уведомлением.
+        case streamUpdate(StreamUpdateEvent)
         /// Событие прочей подписки — показать уведомление.
         case notice(EventSubNotice)
         /// Подписка была отозвана.
@@ -43,6 +46,8 @@ nonisolated enum EventSubRouter {
             switch payload {
             case .chat(let chat):
                 return [.chat(chat)]
+            case .streamUpdate(let update):
+                return [.streamUpdate(update)]
             case .event(let notice):
                 return [.notice(notice)]
             case .unsupported:

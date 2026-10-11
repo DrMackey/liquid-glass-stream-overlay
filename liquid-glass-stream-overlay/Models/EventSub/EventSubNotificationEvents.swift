@@ -387,18 +387,16 @@ nonisolated struct GoalEndEvent: Decodable, Equatable {
 
 // MARK: - Стрим
 
-/// `channel.update`
-nonisolated struct StreamUpdateEvent: Decodable, Equatable {
+/// `channel.update` — тихое обновление данных о трансляции.
+///
+/// Событие не показывается уведомлением: менеджер сам применяет заголовок,
+/// категорию и (при смене `category_id`) догружает постер категории. Поэтому
+/// проекции в `EventSubNotice` здесь нет — событие идёт отдельным типизированным
+/// маршрутом.
+nonisolated struct StreamUpdateEvent: Decodable, Equatable, Sendable {
     let title: String
     let category_name: String?
-
-    var notice: EventSubNotice {
-        EventSubNotice(
-            kind: .streamUpdate,
-            subscriptionType: SubscriptionKind.streamUpdate.rawValue,
-            title: title
-        )
-    }
+    let category_id: String?
 }
 
 // MARK: - Модерация

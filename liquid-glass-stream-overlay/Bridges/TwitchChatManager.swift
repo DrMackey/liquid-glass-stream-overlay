@@ -119,7 +119,6 @@ final class TwitchChatManager: ObservableObject {
     // MARK: - Константы
     enum Constants {
         static let maxMessages = 20
-        static let streamInfoInterval: UInt64 = 30 * 1_000_000_000
         static let notificationDisplayTime = NotificationConstants.displayTime
         static let maxReconnectDelay: TimeInterval = 60
         static let keepaliveTimeout: TimeInterval = 15  // Twitch гарантирует keepalive каждые 10с
@@ -206,10 +205,19 @@ final class TwitchChatManager: ObservableObject {
 
     // MARK: - Приватные свойства
      var channelId: String? = nil
+    // Идентификатор текущей категории (совпадает с `game_id`/`category_id`
+    // Twitch). Нужен, чтобы не догружать постер по `channel.update`, если
+    // категория не менялась. Не `private`: используется из расширения
+    // `StreamInfoLoader` в другом файле.
+     var categoryId: String? = nil
     private var lastDisplayTime: Date = .distantPast
     private var pendingMessage: Message? = nil
     private var displayTimer: Timer?
-    private var streamInfoTask: Task<Void, Never>?
+    // Защищает от повторной выборки данных о стриме на каждое входящее
+    // сообщение: `connected` приходит многократно за одну сессию, а полную
+    // выборку делаем один раз на подключение. Сбрасывается, когда соединение
+    // потеряно, — тогда следующий `connected` снова её запустит.
+    private var hasRefreshedForCurrentConnection = false
 
     // MARK: - EventSub (WebSocket)
     private var eventSubSessionId: String?
@@ -218,7 +226,7 @@ final class TwitchChatManager: ObservableObject {
     private let eventSubURL = TwitchEnv.eventSubURLValue
 
     // MARK: - Init
-    /// - Parameter startNetwork: Поднимать ли EventSub-сокет и цикл инфо о стриме.
+    /// - Parameter startNetwork: Поднимать ли EventSub-сокет.
     ///   Тестам нужен менеджер только как носитель карт эмоутов, поэтому они
     ///   передают `false` и не открывают ни одного соединения.
     init(startNetwork: Bool = true) {
@@ -233,9 +241,6 @@ final class TwitchChatManager: ObservableObject {
     }
 
     private func startNetworkStack() {
-        streamInfoTask = Task { [weak self] in
-            await self?.runStreamInfoLoop()
-        }
         let socket = EventSubSocketClient(
             url: eventSubURL,
             keepaliveTimeout: Constants.keepaliveTimeout,
@@ -261,8 +266,6 @@ final class TwitchChatManager: ObservableObject {
         eventSubConsumerTask = nil
         eventSubSocket?.stop()
         eventSubSocket = nil
-        streamInfoTask?.cancel()
-        streamInfoTask = nil
     }
 
     // MARK: - Helix-заголовки
@@ -347,26 +350,58 @@ extension TwitchChatManager {
         switch event {
         case .connecting(let attempt):
             EventSubLog.debug("Подключаемся (попытка \(attempt))…")
-            DispatchQueue.main.async { self.isConnected = "Подключение…" }
+            DispatchQueue.main.async {
+                self.isConnected = "Подключение…"
+                // Новая попытка соединения — данные о стриме снова нужно
+                // подтянуть, когда соединение установится.
+                self.hasRefreshedForCurrentConnection = false
+            }
 
         case .connected:
-            DispatchQueue.main.async { self.isConnected = "Подключено" }
+            // `connected` приходит на каждое входящее сообщение, поэтому
+            // выборку запускаем лишь один раз на подключение.
+            DispatchQueue.main.async {
+                self.isConnected = "Подключено"
+                self.refreshStreamInfoIfNeeded()
+            }
 
         case .reconnectingIn(let seconds, let attempt):
             if seconds == 0 {
-                DispatchQueue.main.async { self.isConnected = "Переподключение…" }
+                DispatchQueue.main.async {
+                    self.isConnected = "Переподключение…"
+                    self.hasRefreshedForCurrentConnection = false
+                }
             } else {
-                DispatchQueue.main.async { self.isConnected = "Переподключение через \(seconds)с…" }
+                DispatchQueue.main.async {
+                    self.isConnected = "Переподключение через \(seconds)с…"
+                    self.hasRefreshedForCurrentConnection = false
+                }
             }
             EventSubLog.debug("Переподключение: попытка \(attempt), задержка \(seconds)с")
 
         case .failed(let error):
-            DispatchQueue.main.async { self.isConnected = "Ошибка соединения" }
+            DispatchQueue.main.async {
+                self.isConnected = "Ошибка соединения"
+                self.hasRefreshedForCurrentConnection = false
+            }
             EventSubLog.debug("Ошибка соединения: \(error)")
 
         case .stopped:
+            DispatchQueue.main.async { self.hasRefreshedForCurrentConnection = false }
             EventSubLog.debug("Сокет остановлен")
         }
+    }
+
+    /// Однократная выборка данных о стриме на текущее подключение.
+    ///
+    /// Опроса по таймеру больше нет: пока соединение живо, заголовок и
+    /// категорию обновляет событие `channel.update`. Полную выборку делаем
+    /// только при установлении соединения — при первом коннекте и после
+    /// каждого разрыва.
+    private func refreshStreamInfoIfNeeded() {
+        guard !hasRefreshedForCurrentConnection else { return }
+        hasRefreshedForCurrentConnection = true
+        Task { await refreshStreamInfo() }
     }
 
     // MARK: - Поток событий EventSub
@@ -412,6 +447,9 @@ extension TwitchChatManager {
 
             case .notice(let event):
                 appendNotice(event)
+
+            case .streamUpdate(let update):
+                applyStreamUpdate(update)
 
             case .revoke(let subscriptionType):
                 EventSubLog.info("Подписка \(subscriptionType) отозвана")

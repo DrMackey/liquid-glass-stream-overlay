@@ -67,7 +67,9 @@ nonisolated enum EventSubNotificationDecoder {
             return try notice(GoalEndEvent.self) { $0.notice }
 
         case .streamUpdate:
-            return try notice(StreamUpdateEvent.self) { $0.notice }
+            // Тихий путь: событие обновляет данные стрима, а не показывается
+            // уведомлением, поэтому возвращаем типизированный payload.
+            return .streamUpdate(try payload.decode(StreamUpdateEvent.self, forKey: .event))
 
         case .ban:
             return try notice(BanEvent.self) { $0.notice }

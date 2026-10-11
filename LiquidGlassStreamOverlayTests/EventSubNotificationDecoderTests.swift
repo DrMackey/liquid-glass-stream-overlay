@@ -38,8 +38,6 @@ struct EventSubNotificationDecoderTests {
          #"{"goal":{"title":"1000 отжиманий","is_achieved":false,"current_amount":10,"target_amount":1000},"progress":1.0}"#, nil, "1000 отжиманий"),
         ("channel.goal.end", .goalEnd,
          #"{"goal":{"title":"1000 отжиманий","is_achieved":true,"current_amount":1000,"target_amount":1000},"ended_at":"2024-01-01T00:00:00Z"}"#, nil, "1000 отжиманий"),
-        ("channel.update", .streamUpdate,
-         #"{"title":"Новое название стрима","category_name":"Just Chatting"}"#, nil, "Новое название стрима"),
         ("channel.ban", .ban,
          #"{"user_name":"Spammer","moderator_user_name":"Moderator","reason":"спам"}"#, "Spammer", nil),
         ("channel.unban", .unban,
@@ -75,7 +73,7 @@ struct EventSubNotificationDecoderTests {
 
     @Test("SubscriptionKind разбирает и отдаёт настоящие строки Twitch")
     func subscriptionKindMatchesTwitchStrings() throws {
-        let types = Self.cases.map(\.type) + ["channel.chat.message"]
+        let types = Self.cases.map(\.type) + ["channel.chat.message", "channel.update"]
 
         for type in types {
             #expect(SubscriptionKind.parse(type).rawValue == type, "\(type) не совпадает со своей строкой Twitch")
@@ -112,7 +110,7 @@ struct EventSubNotificationDecoderTests {
                 continue
             }
             switch payload {
-            case .chat, .event:
+            case .chat, .event, .streamUpdate:
                 break
             case .unsupported:
                 Issue.record("\(type) разобрался как unsupported")
@@ -137,6 +135,22 @@ struct EventSubNotificationDecoderTests {
         #expect(chat.chatterUserName == "Viewer")
         #expect(chat.text == "Привет")
         #expect(chat.rawColorHex == "#FF0000")
+    }
+
+    // MARK: - Обновление данных стрима
+
+    @Test("channel.update разбирается в типизированный payload, а не в уведомление")
+    func streamUpdateDecodesIntoTypedPayload() throws {
+        let data = Self.makeNotification(type: "channel.update", event: Self.streamUpdateEvent)
+
+        guard case .notification(let payload) = try JSONDecoder().decode(EventSubEvent.self, from: data),
+              case .streamUpdate(let update) = payload else {
+            Issue.record("Ожидался streamUpdate payload")
+            return
+        }
+        #expect(update.title == "Новое название стрима")
+        #expect(update.category_name == "Just Chatting")
+        #expect(update.category_id == "509658")
     }
 
     // MARK: - Поля шаблонов
@@ -303,9 +317,16 @@ struct EventSubNotificationDecoderTests {
 
     // MARK: - Хелперы
 
+    /// Минимальный валидный `channel.update`: идёт отдельным типизированным
+    /// маршрутом, поэтому в `cases` его нет.
+    private static let streamUpdateEvent =
+        #"{"title":"Новое название стрима","category_name":"Just Chatting","category_id":"509658"}"#
+
     /// Минимальные валидные payload'ы из `cases`, собранные в словарь.
     private static var minimalEvents: [String: String] {
-        Dictionary(uniqueKeysWithValues: cases.map { ($0.type, $0.event) })
+        var events = Dictionary(uniqueKeysWithValues: cases.map { ($0.type, $0.event) })
+        events["channel.update"] = streamUpdateEvent
+        return events
     }
 
     /// Разбирает минимальное notification-сообщение и возвращает его `EventSubNotice`.

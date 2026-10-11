@@ -17,20 +17,6 @@ extension TwitchChatManager {
         let data: [Game]
     }
 
-    func runStreamInfoLoop() async {
-        if channelId == nil {
-            if let id = try? await TwitchChatManager.sharedChannelId(login: TWITCH_CHANNEL) {
-                self.channelId = id
-            } else {
-                print("[TwitchChat] fetchChannelId failed")
-            }
-        }
-        while !Task.isCancelled {
-            await refreshStreamInfo()
-            try? await Task.sleep(nanoseconds: Constants.streamInfoInterval)
-        }
-    }
-
     @MainActor
     private func applyChannel(title: String, gameName: String) {
         if streamTitle != title { streamTitle = title }
@@ -42,7 +28,12 @@ extension TwitchChatManager {
         if categoryImageURL != url { categoryImageURL = url }
     }
 
-    private func refreshStreamInfo() async {
+    /// Однократная выборка данных о стриме через Helix `/channels`.
+    ///
+    /// Вызывается по фронту подключения EventSub (первый коннект и каждое
+    /// восстановление после разрыва), а не по таймеру: пока соединение живо,
+    /// заголовок и категорию обновляет событие `channel.update`.
+    func refreshStreamInfo() async {
         do {
             if channelId == nil {
                 channelId = try await TwitchChatManager.sharedChannelId(login: TWITCH_CHANNEL)
@@ -58,22 +49,52 @@ extension TwitchChatManager {
 
             applyChannel(title: channel.title, gameName: channel.game_name)
 
-            if !channel.game_id.isEmpty {
-                let gURL = URL(string: "https://api.twitch.tv/helix/games?id=\(channel.game_id)")!
-                var gReq = URLRequest(url: gURL)
-                addHelixHeaders(&gReq)
-                let (gData, _) = try await URLSession.shared.data(for: gReq)
-                let boxTemplate = (try JSONDecoder().decode(GamesResponse.self, from: gData)).data.first?.box_art_url ?? ""
-                let finalURL = URL(string: boxTemplate
-                    .replacingOccurrences(of: "{width}", with: "300")
-                    .replacingOccurrences(of: "{height}", with: "450"))
-                applyGameImage(url: finalURL)
+            let gameId = channel.game_id.isEmpty ? nil : channel.game_id
+            categoryId = gameId
+            if let gameId {
+                applyGameImage(url: await gameBoxArtURL(gameId: gameId))
             } else {
                 applyGameImage(url: nil)
             }
         } catch {
             print("Ошибка обновления информации о стриме: \(error)")
         }
+    }
+
+    /// Тихий приём `channel.update`: применяет заголовок и категорию из события,
+    /// а постер категории догружает только при смене `category_id`.
+    ///
+    /// Событие не показывается уведомлением — только обновляет данные о стриме.
+    @MainActor
+    func applyStreamUpdate(_ update: StreamUpdateEvent) {
+        if streamTitle != update.title { streamTitle = update.title }
+        if let gameName = update.category_name, categoryName != gameName {
+            categoryName = gameName
+        }
+
+        let newCategoryId = update.category_id.flatMap { $0.isEmpty ? nil : $0 }
+        guard let newCategoryId, newCategoryId != categoryId else { return }
+        categoryId = newCategoryId
+        Task { [weak self] in
+            guard let self else { return }
+            let url = await self.gameBoxArtURL(gameId: newCategoryId)
+            self.applyGameImage(url: url)
+        }
+    }
+
+    /// Загружает постер категории по её идентификатору (Helix `/games`).
+    private func gameBoxArtURL(gameId: String) async -> URL? {
+        guard let gURL = URL(string: "https://api.twitch.tv/helix/games?id=\(gameId)") else { return nil }
+        var gReq = URLRequest(url: gURL)
+        addHelixHeaders(&gReq)
+        guard let (gData, _) = try? await URLSession.shared.data(for: gReq),
+              let boxTemplate = (try? JSONDecoder().decode(GamesResponse.self, from: gData))?.data.first?.box_art_url,
+              !boxTemplate.isEmpty else {
+            return nil
+        }
+        return URL(string: boxTemplate
+            .replacingOccurrences(of: "{width}", with: "300")
+            .replacingOccurrences(of: "{height}", with: "450"))
     }
 }
 

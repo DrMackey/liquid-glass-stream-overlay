@@ -157,20 +157,19 @@ struct EventSubEventTests {
         #expect(notice.userName == "Generous_Gifter")
     }
 
-    @Test("Пустой title трактуется как отсутствие заголовка")
-    func emptyTitleYieldsRawFallback() throws {
+    @Test("channel.update с пустым title остаётся типизированным payload'ом")
+    func emptyTitleStreamUpdateDecodes() throws {
         let event = try decodeNotification(
             subscriptionType: "channel.update",
             overridingEvent: ["title": ""]
         )
         guard case .notification(let payload) = try JSONDecoder().decode(EventSubEvent.self, from: event),
-              case .event(let notice) = payload else {
-            Issue.record("Ожидался event payload")
+              case .streamUpdate(let update) = payload else {
+            Issue.record("Ожидался streamUpdate payload")
             return
         }
 
-        #expect(notice.title == "")
-        #expect(notice.subscriptionType == "channel.update")
+        #expect(update.title == "")
     }
 
     @Test("Неизвестный subscription_type не превращается в уведомление")
