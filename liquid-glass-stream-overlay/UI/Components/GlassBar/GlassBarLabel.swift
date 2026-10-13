@@ -175,11 +175,14 @@ struct GlassBarLabel: View {
             .onChange(of: visibleItems.first?.id, initial: false) { _, newFirstId in
                 guard isNotification else { return }
                 guard let newId = newFirstId else { return }
-                if newId != lastProcessedMessageId {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        SoundPlayer.playSound(sound: "notification", type: "mp3")
-                    }
-                    lastProcessedMessageId = newId
+                guard newId != lastProcessedMessageId else { return }
+                lastProcessedMessageId = newId
+                // Локальные уведомления (например, Telegram) приходят без звука.
+                if case .notification(let notification) = visibleItems.first, !notification.playsSound {
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    SoundPlayer.playSound(sound: "notification", type: "mp3")
                 }
             }
         }

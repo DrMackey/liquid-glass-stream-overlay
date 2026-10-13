@@ -25,6 +25,9 @@ struct Notification: Equatable, Identifiable {
     let senderColor: Color?
     let badges: [(String, String)]
     let badgeViewData: [BadgeViewData]
+    /// Проигрывать ли звук при появлении уведомления. Локальные уведомления
+    /// приходят с `false`, события Twitch — с `true`.
+    let playsSound: Bool
 
     /// Плоский текст «заголовок — тело» для общего потока сообщений.
     var text: String {
@@ -42,7 +45,8 @@ struct Notification: Equatable, Identifiable {
         sender: String,
         senderColor: Color?,
         badges: [(String, String)] = [],
-        badgeViewData: [BadgeViewData] = []
+        badgeViewData: [BadgeViewData] = [],
+        playsSound: Bool = true
     ) {
         self.id = id
         self.kind = kind
@@ -54,6 +58,7 @@ struct Notification: Equatable, Identifiable {
         self.senderColor = senderColor
         self.badges = badges
         self.badgeViewData = badgeViewData
+        self.playsSound = playsSound
     }
 
     static func == (lhs: Notification, rhs: Notification) -> Bool {
@@ -66,6 +71,36 @@ struct Notification: Equatable, Identifiable {
         lhs.sender == rhs.sender &&
         lhs.badges.elementsEqual(rhs.badges, by: { $0.0 == $1.0 && $0.1 == $1.1 }) &&
         lhs.senderColor == rhs.senderColor &&
-        lhs.badgeViewData == rhs.badgeViewData
+        lhs.badgeViewData == rhs.badgeViewData &&
+        lhs.playsSound == rhs.playsSound
     }
+}
+
+/// Локальное уведомление приложения: приходит не от Twitch, а создаётся
+/// самим оверлеем (например, призыв подписаться на Telegram). Показывается
+/// в общем потоке уведомлений циклически.
+nonisolated struct LocalNotification: Equatable {
+    /// Тип события. Для локальных уведомлений — `.other(...)`.
+    let kind: SubscriptionKind
+    /// Заголовок уведомления. `nil` — показывать без заголовка.
+    let title: String?
+    /// Текст (тело) уведомления.
+    let body: String
+    /// Имя ассета иконки.
+    let icon: String?
+    /// Проигрывать ли звук при появлении.
+    let playsSound: Bool
+}
+
+/// Набор локальных уведомлений приложения.
+nonisolated enum LocalNotifications {
+
+    /// Призыв подписаться на Telegram-канал. Звук при появлении не играет.
+    static let telegram = LocalNotification(
+        kind: .other("local.telegram"),
+        title: "Подписывайся на Telegram",
+        body: "Анонсы стримов и новости",
+        icon: "Telegram",
+        playsSound: false
+    )
 }

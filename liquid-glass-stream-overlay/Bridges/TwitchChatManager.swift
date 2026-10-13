@@ -122,6 +122,8 @@ final class TwitchChatManager: ObservableObject {
         static let notificationDisplayTime = NotificationConstants.displayTime
         static let maxReconnectDelay: TimeInterval = 60
         static let keepaliveTimeout: TimeInterval = 15  // Twitch гарантирует keepalive каждые 10с
+        /// Интервал повторного показа локальных уведомлений (10 минут).
+        static let localNotificationInterval: TimeInterval = 600
     }
 
     // MARK: - Кэш channelId
@@ -225,6 +227,10 @@ final class TwitchChatManager: ObservableObject {
     private var eventSubConsumerTask: Task<Void, Never>?
     private let eventSubURL = TwitchEnv.eventSubURLValue
 
+    // MARK: - Локальные уведомления
+    /// Циклический показ локальных уведомлений приложения.
+    private var localNotificationTask: Task<Void, Never>?
+
     // MARK: - Init
     /// - Parameter startNetwork: Поднимать ли EventSub-сокет.
     ///   Тестам нужен менеджер только как носитель карт эмоутов, поэтому они
@@ -238,6 +244,9 @@ final class TwitchChatManager: ObservableObject {
                     manager: self,
                     cancellables: &cancellables
                 )
+        if startNetwork {
+            startLocalNotifications()
+        }
     }
 
     private func startNetworkStack() {
@@ -262,6 +271,8 @@ final class TwitchChatManager: ObservableObject {
     // MARK: - Stop
     func stop() {
         EventSubLog.info("stop()")
+        localNotificationTask?.cancel()
+        localNotificationTask = nil
         eventSubConsumerTask?.cancel()
         eventSubConsumerTask = nil
         eventSubSocket?.stop()
@@ -496,6 +507,51 @@ extension TwitchChatManager {
         if messages.count > Constants.maxMessages {
             messages.removeFirst(messages.count - Constants.maxMessages)
         }
+    }
+
+    // MARK: - Локальные уведомления
+    /// Запускает циклический показ локальных уведомлений.
+    ///
+    /// Первое уведомление приходит через `localNotificationInterval` после
+    /// запуска, затем повторяется с тем же интервалом. Таск наследует изоляцию
+    /// главного актора, поэтому менять `@Published`-состояние безопасно.
+    func startLocalNotifications() {
+        localNotificationTask?.cancel()
+        localNotificationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(Constants.localNotificationInterval))
+                } catch {
+                    return
+                }
+                guard let self, !Task.isCancelled else { return }
+                self.appendLocal(LocalNotifications.telegram)
+            }
+        }
+    }
+
+    /// Добавляет локальное уведомление в общий поток: карточку и дубликат-сообщение,
+    /// как это делает `appendNotice` для событий Twitch.
+    private func appendLocal(_ local: LocalNotification) {
+        let badgeViewData = badgeViews(from: [], badgeUrlMap: allBadgeImages)
+        let notification = Notification(
+            id: UUID(),
+            kind: local.kind,
+            title: local.title,
+            body: local.body,
+            icon: local.icon,
+            accent: nil,
+            sender: "Telegram",
+            senderColor: .gray,
+            badges: [],
+            badgeViewData: badgeViewData,
+            playsSound: local.playsSound
+        )
+        notifications.append(notification)
+        messages.append(Message(id: UUID(), sender: "Telegram", text: notification.text,
+                                badges: [], senderColor: .gray, badgeViewData: badgeViewData,
+                                isNotice: true))
+        trimMessages()
     }
 
     // MARK: - Билдер тела подписки
