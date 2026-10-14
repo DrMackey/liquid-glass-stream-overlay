@@ -548,9 +548,14 @@ extension TwitchChatManager {
             playsSound: local.playsSound
         )
         notifications.append(notification)
-        messages.append(Message(id: UUID(), sender: "Telegram", text: notification.text,
-                                badges: [], senderColor: .gray, badgeViewData: badgeViewData,
-                                isNotice: true))
+        // Дубликат во внутренний стек добавляем, только если такого уведомления
+        // там ещё нет: при повторном цикле не плодим одинаковые сообщения.
+        let alreadyInStack = messages.contains { $0.isNotice && $0.text == notification.text }
+        if !alreadyInStack {
+            messages.append(Message(id: UUID(), sender: "Telegram", text: notification.text,
+                                    badges: [], senderColor: .gray, badgeViewData: badgeViewData,
+                                    isNotice: true))
+        }
         trimMessages()
     }
 
